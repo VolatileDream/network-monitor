@@ -66,14 +66,14 @@ monitor() {
   local -A gateways=()
   local -A nexts=()
 
-  echo "status,reinit"
+  #echo "status,reinit"
 
   for i in "${ifaces[@]}"; do
     gateways["$i"]=`gateway "$i"`
     nexts["$i"]=`gateway-next-hop "$i"`
   done
 
-  echo "status,ready"
+  #echo "status,ready"
 
   while [[ $SECONDS -lt $reset_time ]]; do
     for i in "${ifaces[@]}"; do
@@ -108,6 +108,6 @@ if [[ $# -le 0 ]]; then
 else
   case "$1" in
     hilite) run | hilite-lost ;;
-    *) echo "unrecognized command: $1" ; exit 1 ;;
+    *) echo "unrecognized command: $1" 2>> /dev/stderr ; exit 1 ;;
   esac
 fi
