@@ -1,5 +1,7 @@
 #!/usr/bin/env python-mr
 
+from collections import defaultdict
+
 from _.command_line.app import APP
 from _.command_line.flags import Flag
 from _.data.formatting.blocks import Block
@@ -22,38 +24,42 @@ def aggregate_block(td, percentiles):
   return Block.space().hjoin(cs)
 
 
-def main(filename):
-  interfaces = {}
-  pingpairs = {}
+def dump(interfaces, pingpairs, lost):
+  percentiles = [50, 90.0, 95.0, 99.0, 99.9]
+  for i in interfaces:
+    #print(Block(i) | aggregate_block(interfaces[i], percentiles))
+    pass
 
+  for i in pingpairs:
+    interface, dest = i
+    digest = pingpairs[i]
+    header = Block("%s => %s (lost: %s / %s)" % (interface, dest, lost[i], digest.count()))
+    print(header | aggregate_block(digest, percentiles))
+
+
+def main(filename):
   def digest():
-    return TDigest(1000)
+    return TDigest(10000)
+
+  interfaces = defaultdict(digest)
+  pingpairs = defaultdict(digest)
+
+  lost = defaultdict(int)
 
   l = FLAG_lost_latency.value
   for (interface, ping, latency) in _lines(filename):
     if latency == "lost":
+      lost[(interface, ping)] += 1
       if l is None:
         continue
       latency = l
     else:
       latency = float(latency)
 
-    #if interface not in interfaces:
-    #  interfaces[interface] = digest()
     #interfaces[interface].add(latency)
-
-    if (interface, ping) not in pingpairs:
-      pingpairs[(interface, ping)] = digest()
     pingpairs[(interface, ping)].add(latency)
 
-  percentiles = [50, 90.0, 95.0, 99.0, 99.9]
-
-  for i in interfaces:
-    #print(Block(i) | aggregate_block(interfaces[i], percentiles))
-    pass
-
-  for i in pingpairs:
-    print(Block("%s => %s" % i) | aggregate_block(pingpairs[i], percentiles))
+  dump(interfaces, pingpairs, lost)
 
 
 if __name__ == "__main__":
