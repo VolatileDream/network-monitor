@@ -10,20 +10,9 @@ FLAG_lost_latency = Flag.float("lost-latency", default=None, description="Latenc
 def _lines(filename):
   with open(filename) as f:
     for line in f:
-      date, time, interface, ping, latency = line.rstrip("\n\r").split(",")
-      yield (date, time, interface, ping, latency)
-
-
-def detect(filename):
-  interfaces = set()
-  ips = set()
-  
-  for data in _lines(filename):
-    date, time, interface, ping, latency = data
-    interfaces.add(interface)
-    ips.add((interface, ping))
-
-  return interfaces, ips
+      line = line.rstrip()
+      _date, _time, interface, ping, latency = line.split(",")
+      yield (interface, ping, latency)
 
 
 def aggregate_block(td, percentiles):
@@ -34,22 +23,27 @@ def aggregate_block(td, percentiles):
 
 
 def main(filename):
-  interfaces, pingpairs = detect(filename)
+  interfaces = {}
+  pingpairs = {}
 
-  interfaces = { i: TDigest(1000) for i in interfaces }
-  pingpairs = { i: TDigest(1000) for i in pingpairs }
-
+  def digest():
+    return TDigest(1000)
 
   l = FLAG_lost_latency.value
-  for data in _lines(filename):
-    date, time, interface, ping, latency = data
+  for (interface, ping, latency) in _lines(filename):
     if latency == "lost":
-      if l is not None:
-       latency = l
-      else:
+      if l is None:
         continue
-    latency = float(latency)
-    interfaces[interface].add(latency)
+      latency = l
+    else:
+      latency = float(latency)
+
+    #if interface not in interfaces:
+    #  interfaces[interface] = digest()
+    #interfaces[interface].add(latency)
+
+    if (interface, ping) not in pingpairs:
+      pingpairs[(interface, ping)] = digest()
     pingpairs[(interface, ping)].add(latency)
 
   percentiles = [50, 90.0, 95.0, 99.0, 99.9]
