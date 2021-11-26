@@ -27,7 +27,9 @@ gateway-next-hop() {
   local host=$(shuf --head-count 1 --echo "${options[@]}")
 
   # Run traceroute to find out the hop after the gateway server.
-  traceroute --icmp --wait=1 --max-hop=2 "$host" | awk '$1 == 2 { print $2 }'
+  # Traceroute exits with non-zero because it doesn't succesfully ping the
+  # server we told it to. We don't want it to do that, so we must `|| true`.
+  (traceroute --icmp --wait=1 --max-hop=2 "$host" || true) | awk '$1 == 2 { print $2 }'
 }
 
 prefix-timestamp() {
@@ -103,6 +105,7 @@ run() {
 }
 
 
+set -o pipefail -o errexit -o nounset
 if [[ $# -le 0 ]]; then
   run
 else
