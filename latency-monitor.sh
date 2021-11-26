@@ -43,7 +43,9 @@ do-ping() {
   local -r iface="$1" ; shift
   local -r label="$1" ; shift
   local -r dest="$1" ; shift
-  ping -4 -c $count -I "$iface" "$dest" -O -W 1 | \
+  # If no packets arrive ping will exit with non-zero status.
+  # We want to keep running when that happens.
+  (ping -4 -c $count -I "$iface" "$dest" -O -W 1 || true) | \
     awk ' /no answer yet/ { print "lost" } /time=/ { print(substr($7, 6)) }' |\
     awk "
       BEGIN { c = 0 ; }
