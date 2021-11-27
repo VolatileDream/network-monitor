@@ -4,10 +4,13 @@ from collections import defaultdict
 
 from _.command_line.app import APP
 from _.command_line.flags import Flag
+from _.command_line.flags_ext import ListFlag
 from _.data.formatting.blocks import Block
 from _.sketch.t_digest.tdigest import TDigest
 
 FLAG_lost_latency = Flag.float("lost-latency", default=None, description="Latency value to use for lost packets, by default they are ignored.")
+FLAG_percentiles = ListFlag("percentile", float, short="p", default=[50, 90.0, 95.0, 99.0, 99.9])
+
 
 def _lines(filename):
   with open(filename) as f:
@@ -25,7 +28,8 @@ def aggregate_block(td, percentiles):
 
 
 def dump(interfaces, pingpairs, lost):
-  percentiles = [50, 90.0, 95.0, 99.0, 99.9]
+  percentiles = list(FLAG_percentiles.value)
+  percentiles.sort()
   for i in interfaces:
     #print(Block(i) | aggregate_block(interfaces[i], percentiles))
     pass
