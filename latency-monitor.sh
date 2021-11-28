@@ -26,10 +26,16 @@ gateway-next-hop() {
   # Pick one to use.
   local host=$(shuf --head-count 1 --echo "${options[@]}")
 
+
   # Run traceroute to find out the hop after the gateway server.
   # Traceroute exits with non-zero because it doesn't succesfully ping the
   # server we told it to. We don't want it to do that, so we must `|| true`.
-  (traceroute --icmp --wait=1 --max-hop=2 "$host" || true) | awk '$1 == 2 { print $2 }'
+  local -r hop=`(traceroute --icmp --wait=1 --max-hop=2 "$host" || true) |\
+                 awk '$1 == 2 { print $2 }'`
+
+  # Test the value from traceroute. If it can not be pinged, it's no good.
+  echo "Using $host for first-hop => got $hop" >> /dev/stderr
+  ping -4 -c 1 -W 1 -I "$iface" "$hop" > /dev/null && echo "$hop" || true
 }
 
 prefix-timestamp() {
@@ -70,35 +76,37 @@ monitor() {
   local -A gateways=()
   local -A nexts=()
 
-  #echo "status,reinit"
+  echo "Setting up gateway & next hop across: ${ifaces[@]}" >> /dev/stderr
 
   for i in "${ifaces[@]}"; do
     gateways["$i"]=`gateway "$i"`
     nexts["$i"]=`gateway-next-hop "$i"`
   done
 
-  #echo "status,ready"
+  echo "Monitoring..." >> /dev/stderr
 
   while [[ $SECONDS -lt $reset_time ]]; do
     for i in "${ifaces[@]}"; do
       if [[ "$(state "$i")" != "up" ]]; then
         # Downed interfaces get no output.
-        #echo "${i},not-up"
         continue
       fi
       local g="${gateways[$i]}"
       local n="${nexts[$i]}"
       do-ping "$i" gateway "$g"
-      do-ping "$i" first-hop "$n"
+      [ -n "$n" ] && do-ping "$i" first-hop "$n"
     done
   done  
 }
 
 run() {
-  # Reset attributes every hour
-  local -r period=$((60 * 60 * 1))
-  # Jitter window 10m wide
-  local -r jitter=$((60 * 10))
+  # Reset attributes every 15m, mostly to reset first-hop data.
+  # Not having first-hop data for 15m is tolerable, since the initialization
+  # of the gateways & first-hop addresses takes a few seconds, it's better
+  # not to repeatedly perform that setup.
+  local -r period=$((60 * 60 * 1 / 4))
+  # Jitter window has width of 10% of the monitoring period.
+  local -r jitter=$((period / 10))
 
   while true; do
     local duration=$((period + RANDOM % jitter))
