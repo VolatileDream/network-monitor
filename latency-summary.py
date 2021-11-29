@@ -8,8 +8,16 @@ from _.command_line.flags_ext import ListFlag
 from _.data.formatting.blocks import Block
 from _.sketch.t_digest.tdigest import TDigest
 
-FLAG_lost_latency = Flag.float("lost-latency", default=None, description="Latency value to use for lost packets, by default they are ignored.")
-FLAG_percentiles = ListFlag("percentile", float, short="p", default=[50, 90.0, 95.0, 99.0, 99.9])
+import logging
+logger = logging.getLogger(__name__)
+
+FLAG_lost_latency_mod = Flag.float("lost-latency-mod", default=1.1, description=
+                                  ("Multiplier modifier for attributing latency "
+                                   "to lost packets. Maximum latency seen so far is "
+                                   "multiplied by this modifier when lost packets "
+                                   "are encountered."))
+FLAG_percentiles = ListFlag("percentiles", float, short="p",
+                            default=[50, 90.0, 95.0, 99.0, 99.9])
 
 
 def _lines(filename):
@@ -42,6 +50,10 @@ def dump(interfaces, pingpairs, lost):
 
 
 def main(filename):
+  mod = FLAG_lost_latency_mod.value
+  if mod < 1.0:
+    logger.error("--lost-latency-mod should be set greater than or equal to one.")
+
   def digest():
     return TDigest(10000)
 
@@ -50,15 +62,14 @@ def main(filename):
 
   lost = defaultdict(int)
 
-  l = FLAG_lost_latency.value
+  maximum_latency = 0 # highest latency seen so far
   for (interface, ping, latency) in _lines(filename):
     if latency == "lost":
       lost[(interface, ping)] += 1
-      if l is None:
-        continue
-      latency = l
+      latency = maximum_latency * mod
     else:
       latency = float(latency)
+      maximum_latency = max(latency, maximum_latency)
 
     #interfaces[interface].add(latency)
     pingpairs[(interface, ping)].add(latency)
