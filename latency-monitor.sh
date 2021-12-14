@@ -1,17 +1,38 @@
 #!/usr/bin/env bash
+set -o pipefail -o errexit -o errtrace -o nounset
+
+debug() {
+  echo "Trapped ERR, func trace:"
+  local i=${#BASH_LINENO[@]}
+  while [[ $i -gt 1 ]]; do
+    i=$((i-1))
+    echo " ${FUNCNAME[$i]} at ${BASH_SOURCE[$i]}:${BASH_LINENO[$i]}"
+  done
+  exit
+}
+trap debug ERR
+
 
 interfaces() {
   ls /sys/class/net/
 }
 
-gateway() {
-  local iface="$1" ; shift
-  ip route list dev "$iface" | awk '/^default/ { print $3 }'
-}
-
 state() {
   local iface="$1" ; shift
   cat "/sys/class/net/${iface}/operstate"
+}
+
+test-ping() {
+  local -r iface="$1"; shift
+  local -r hop="$1"; shift
+  ping -4 -c 1 -W 1 -I "$iface" "$hop" > /dev/null && echo "$hop" || true
+}
+
+gateway() {
+  local -r iface="$1" ; shift
+  local -r gateway=`ip route list dev "$iface" | awk '/^default/ { print $3 }'`
+  echo "Testing reachability of $gateway via $iface" >> /dev/stderr
+  test-ping "$iface" "$gateway"
 }
 
 gateway-next-hop() {
@@ -26,7 +47,6 @@ gateway-next-hop() {
   # Pick one to use.
   local host=$(shuf --head-count 1 --echo "${options[@]}")
 
-
   # Run traceroute to find out the hop after the gateway server.
   # Traceroute exits with non-zero because it doesn't succesfully ping the
   # server we told it to. We don't want it to do that, so we must `|| true`.
@@ -35,7 +55,7 @@ gateway-next-hop() {
 
   # Test the value from traceroute. If it can not be pinged, it's no good.
   echo "Using $host for first-hop => got $hop" >> /dev/stderr
-  ping -4 -c 1 -W 1 -I "$iface" "$hop" > /dev/null && echo "$hop" || true
+  test-ping "$iface" "$hop"
 }
 
 prefix-timestamp() {
@@ -93,7 +113,7 @@ monitor() {
       fi
       local g="${gateways[$i]}"
       local n="${nexts[$i]}"
-      do-ping "$i" gateway "$g"
+      [ -n "$g" ] && do-ping "$i" gateway "$g"
       [ -n "$n" ] && do-ping "$i" first-hop "$n"
     done
   done  
@@ -114,8 +134,6 @@ run() {
   done
 }
 
-
-set -o pipefail -o errexit -o nounset
 if [[ $# -le 0 ]]; then
   run
 else
