@@ -11,6 +11,7 @@ from _.sketch.t_digest.tdigest import TDigest
 import logging
 logger = logging.getLogger(__name__)
 
+
 FLAG_lost_latency_mod = Flag.float("lost-latency-mod", default=1.1, description=
                                   ("Multiplier modifier for attributing latency "
                                    "to lost packets. Maximum latency seen so far is "
@@ -62,17 +63,18 @@ def main(filename):
 
   lost = defaultdict(int)
 
-  maximum_latency = 0 # highest latency seen so far
+  maximum_latency = defaultdict(int)
   for (interface, ping, latency) in _lines(filename):
+    dest = (interface, ping)
     if latency == "lost":
-      lost[(interface, ping)] += 1
-      latency = maximum_latency * mod
+      lost[dest] += 1
+      latency = maximum_latency[dest] * mod
     else:
       latency = float(latency)
-      maximum_latency = max(latency, maximum_latency)
+      maximum_latency[dest] = max(latency, maximum_latency[dest])
 
     #interfaces[interface].add(latency)
-    pingpairs[(interface, ping)].add(latency)
+    pingpairs[dest].add(latency)
 
   dump(interfaces, pingpairs, lost)
 
