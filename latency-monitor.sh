@@ -2,11 +2,11 @@
 set -o pipefail -o errexit -o errtrace -o nounset
 
 debug() {
-  echo "Trapped ERR, func trace:"
+  echo "Trapped ERR, func trace:" >> /dev/stderr
   local i=${#BASH_LINENO[@]}
-  while [[ $i -gt 1 ]]; do
+  while [[ $i -gt 0 ]]; do
     i=$((i-1))
-    echo " ${FUNCNAME[$i]} at ${BASH_SOURCE[$i]}:${BASH_LINENO[$i]}"
+    echo " ${FUNCNAME[$i]} at ${BASH_SOURCE[$i]}:${BASH_LINENO[$i]}" >> /dev/stderr
   done
   exit
 }
@@ -19,7 +19,9 @@ interfaces() {
 
 state() {
   local iface="$1" ; shift
-  cat "/sys/class/net/${iface}/operstate"
+  # Sometimes interfaces disappear. When that happens, treat it as though
+  # we don't know what their state it.
+  cat "/sys/class/net/${iface}/operstate" 2> /dev/null || echo unknown
 }
 
 test-ping() {
