@@ -79,5 +79,8 @@ def main(filename):
   dump(interfaces, pingpairs, lost)
 
 
-if __name__ == "__main__":
+def m():
   APP.run(main)
+
+
+if __name__ == "__main__": m()
