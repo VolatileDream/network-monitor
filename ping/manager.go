@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+
+	"web/network-monitor/icmp"
 )
 
 type ProbeRequest struct {
@@ -88,7 +90,7 @@ func (p *Manager) Run(ctx context.Context) error {
 func (m *Manager) add(ctx context.Context, p ProbeRequest) error {
 	mon, ok := m.interfaces[p.Source]
 	if !ok {
-		socket, err := ListenIcmp(p.Source)
+		socket, err := icmp.ListenIcmp(p.Source)
 		if err != nil {
 			return fmt.Errorf("could not listen: %w", err)
 		}

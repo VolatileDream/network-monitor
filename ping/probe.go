@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/net/icmp"
+	"web/network-monitor/icmp"
+
+	xicmp "golang.org/x/net/icmp"
 )
 
 var (
@@ -31,7 +33,7 @@ type monitorsByInterface struct {
 	// Cancel func provided by ctx used to start them.
 	cancel func()
 	source netip.Addr
-	socket *icmp.PacketConn
+	socket *xicmp.PacketConn
 
 	result chan<- *PingResult
 
@@ -70,12 +72,12 @@ func sendall(src *monitorsByInterface) {
 	for dest, m := range src.monitors {
 		src.sequence += 1
 		now := time.Now()
-		echo := icmp.Echo{
+		echo := xicmp.Echo{
 			ID:   0, // can't be set by us.
 			Seq:  int(src.sequence),
 			Data: []byte("VolatileDream//web/network-monitor"),
 		}
-		if err := SendIcmpEcho(src.socket, &echo, dest); err != nil {
+		if err := icmp.SendIcmpEcho(src.socket, &echo, dest); err != nil {
 			fmt.Printf("problem with sending packet: %v\n", err)
 			continue
 		}
@@ -98,7 +100,7 @@ func receiver(ctx context.Context, src *monitorsByInterface) {
 		}
 		// Keep extending the deadline to have an idle check.
 		src.socket.SetReadDeadline(time.Now().Add(5 * time.Second))
-		echo, err := ReadIcmpEcho(src.source, src.socket)
+		echo, err := icmp.ReadIcmpEcho(src.socket)
 
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
@@ -119,23 +121,23 @@ func receiver(ctx context.Context, src *monitorsByInterface) {
 		}
 	}
 }
-func (m *monitorsByInterface) handleReceive(echo *IcmpResponse) error {
+func (m *monitorsByInterface) handleReceive(echo *icmp.IcmpResponse) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	monitor, ok := m.monitors[echo.from]
+	monitor, ok := m.monitors[echo.From]
 	if !ok {
 		//return errNoMonitor
-		return fmt.Errorf("monitor not found for: %s", echo.from)
+		return fmt.Errorf("monitor not found for: %s", echo.From)
 	}
 
 	// Try to find the the number in the outstanding packet list.
 	found := false
 	for i, outstanding := range monitor.wire {
-		if outstanding.Seq == echo.echo.Seq {
+		if outstanding.Seq == echo.Echo.Seq {
 			p := &PingResult{
 				Sent: outstanding.Sent,
-				Recv: echo.when,
+				Recv: echo.When,
 				Src:  m.source,
 				Dest: monitor.dest,
 			}
@@ -157,7 +159,7 @@ func (m *monitorsByInterface) handleReceive(echo *IcmpResponse) error {
 	if !found {
 		// Not clear if we should drop the contents of wire here or not?
 		// monitor.wire = monitor.wire[:0]
-		log.Printf("did not find packet for %v seq: %d", echo.from, echo.echo.Seq)
+		log.Printf("did not find packet for %v seq: %d", echo.From, echo.Echo.Seq)
 	}
 
 	return nil
