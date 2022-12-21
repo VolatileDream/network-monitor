@@ -10,19 +10,56 @@ import (
 	"os/signal"
 	"time"
 
+	//"web/network-monitor/icmp"
 	"web/network-monitor/ping"
-	"web/network-monitor/telemetry"
+	"web/network-monitor/trace"
+	//"web/network-monitor/telemetry"
+)
+
+var (
+	_ = trace.TraceResult{}
 )
 
 func main() {
-	cleanup, err := telemetry.Setup()
-	defer cleanup()
+	/*
+		cleanup, err := telemetry.Setup()
+		defer cleanup()
 
-	if err != nil {
-		fmt.Printf("failed to setup telemetry: %v\n", err)
-		os.Exit(1)
+		if err != nil {
+			fmt.Printf("failed to setup telemetry: %v\n", err)
+			os.Exit(1)
+		}
+	*/
+
+	nets, _ := net.Interfaces()
+	for _, iface := range nets {
+		fmt.Println(iface)
+		addrs, _ := iface.Addrs()
+		fmt.Println("  ", addrs)
 	}
 
+	//*
+	res, err := trace.TraceRoute(
+		context.Background(),
+		//netip.MustParseAddr("192.168.100.1"),
+		netip.MustParseAddr("8.8.8.8"),
+		trace.TraceRouteOptions{
+			MaxHops:   8,
+			Retries:   1,
+			Interface: netip.MustParseAddr("192.168.1.117"),
+		})
+	fmt.Println(res)
+	fmt.Println(err)
+
+	names, err := trace.ResolveHops(context.Background(), res.Hops, 2*time.Second)
+	fmt.Println(names)
+	fmt.Println(err)
+	//*/
+
+	return
+}
+
+func run() {
 	// Kill the app on sigint
 	appCtx, appCancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer appCancel()

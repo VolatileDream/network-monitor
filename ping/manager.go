@@ -90,7 +90,7 @@ func (p *Manager) Run(ctx context.Context) error {
 func (m *Manager) add(ctx context.Context, p ProbeRequest) error {
 	mon, ok := m.interfaces[p.Source]
 	if !ok {
-		socket, err := icmp.ListenIcmp(p.Source)
+		socket, err := icmp.Listen(p.Source)
 		if err != nil {
 			return fmt.Errorf("could not listen: %w", err)
 		}

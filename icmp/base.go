@@ -15,41 +15,50 @@ import (
 const (
 	// Derived from the common MTU for IP networks.
 	// Packets larger than this get fragmented.
-	icmpMaxPacketSize = 1500
-
-	// https://www.iana.org/assignments/ip-parameters/ip-parameters.xml#ip-parameters-2
-	DefaultTTL = 64
+	commonMaximumTransmissionUnit = 1500
 )
 
-func ListenIcmp(ip netip.Addr) (*xicmp.PacketConn, error) {
+// ListenIcmp creates a packet connection to send and receive ICMP messages.
+// This *should* work without privileged access, but will only receive ICMP
+// Echo messages. That is: can be used to ping a host, but not much more.
+func Listen(ip netip.Addr) (*xicmp.PacketConn, error) {
+	return listen(ip, udpCfg)
+}
+
+// ListenPrivileged requires privileged access on the system (eg: root or
+// CAP_NET_BIND_SERVICE on linux). But with this access is capable of sending
+// and receiving more types of icmp messages, ex: this will receive TTL Exceeded.
+func ListenPrivileged(ip netip.Addr) (*xicmp.PacketConn, error) {
+	return listen(ip, icmpCfg)
+}
+
+type bindCfg struct {
+	ip4 string
+	ip6 string
+}
+
+var (
+	icmpCfg = bindCfg{
+		ip4: "ip4:icmp",
+		ip6: "ip6:ipv6-icmp",
+	}
+	udpCfg = bindCfg{
+		ip4: "udp4",
+		ip6: "udp6",
+	}
+)
+
+func listen(ip netip.Addr, cfg bindCfg) (*xicmp.PacketConn, error) {
 	if ip.Is4In6() {
 		ip = ip.Unmap()
 	}
 
+	addr := ip.String()
+	proto := cfg.ip6
 	if ip.Is4() {
-		return xicmp.ListenPacket("udp4", ip.String())
-	} else {
-		return xicmp.ListenPacket("udp6", ip.String())
+		proto = cfg.ip4
 	}
-}
-
-func GetTTL(i *xicmp.PacketConn) int {
-	var ttl int
-	if v4 := i.IPv4PacketConn(); v4 != nil {
-		ttl, _ = v4.TTL()
-	} else if v6 := i.IPv6PacketConn(); v6 != nil {
-		ttl, _ = v6.HopLimit()
-	}
-	return ttl
-}
-
-func SetTTL(i *xicmp.PacketConn, ttl int) error {
-	if v4 := i.IPv4PacketConn(); v4 != nil {
-		v4.SetTTL(ttl)
-	} else if v6 := i.IPv6PacketConn(); v6 != nil {
-		v6.SetHopLimit(ttl)
-	}
-	return fmt.Errorf("icmp connection not IP v4 or v6")
+	return xicmp.ListenPacket(proto, addr)
 }
 
 func SendIcmpEcho(i *xicmp.PacketConn, e *xicmp.Echo, addr netip.Addr) error {
@@ -68,7 +77,10 @@ func SendIcmpEcho(i *xicmp.PacketConn, e *xicmp.Echo, addr netip.Addr) error {
 		return fmt.Errorf("could not marshal packet: %w", err)
 	}
 
-	_, err = i.WriteTo(b, &net.UDPAddr{IP: addr.AsSlice()})
+	_, err = i.WriteTo(b, &net.UDPAddr{
+		IP: addr.AsSlice(),
+		//Port: traceroutePort,
+	})
 	return err
 }
 
@@ -79,7 +91,7 @@ type IcmpResponse struct {
 }
 
 func ReadIcmp(conn *xicmp.PacketConn) (netip.Addr, *xicmp.Message, error) {
-	recv := make([]byte, icmpMaxPacketSize)
+	recv := make([]byte, commonMaximumTransmissionUnit)
 	c, addr, err := conn.ReadFrom(recv)
 	recv = recv[:c]
 
@@ -87,15 +99,19 @@ func ReadIcmp(conn *xicmp.PacketConn) (netip.Addr, *xicmp.Message, error) {
 		return netip.Addr{}, nil, err
 	}
 
-	origin, err := netip.ParseAddrPort(addr.String())
-	if err != nil {
-		return netip.Addr{}, nil, fmt.Errorf("unable to parse packet source %s: %w", addr.String(), err)
+	var recvAddr netip.Addr
+	if origin, err := netip.ParseAddrPort(addr.String()); err == nil {
+		recvAddr = origin.Addr()
+	} else if origin, err := netip.ParseAddr(addr.String()); err == nil {
+		recvAddr = origin
+	} else {
+		return netip.Addr{}, nil, fmt.Errorf("failed to parse into ip address: %s", addr.String())
 	}
 
 	proto := 1 // Icmp4 number.
 	// This comparison doesn't work the other way, because an ipv4
 	// address can always be embedded in an ipv6 address.
-	if netip.MustParseAddrPort(conn.LocalAddr().String()).Addr().Is6() {
+	if !connIsIPv4(conn) {
 		proto = 58 // Icmp6 number.
 	}
 	msg, err := xicmp.ParseMessage(proto, recv)
@@ -103,11 +119,11 @@ func ReadIcmp(conn *xicmp.PacketConn) (netip.Addr, *xicmp.Message, error) {
 		return netip.Addr{}, nil, fmt.Errorf("bad icmp packet: %w", err)
 	}
 
-	return origin.Addr(), msg, nil
+	return recvAddr, msg, nil
 }
 
 func ReadIcmpEcho(conn *xicmp.PacketConn) (*IcmpResponse, error) {
-	recv := make([]byte, icmpMaxPacketSize)
+	recv := make([]byte, commonMaximumTransmissionUnit)
 	c, addr, err := conn.ReadFrom(recv)
 	now := time.Now()
 	recv = recv[:c]
@@ -128,7 +144,7 @@ func ReadIcmpEcho(conn *xicmp.PacketConn) (*IcmpResponse, error) {
 	proto := 1 // Icmp4 number.
 	// This comparison doesn't work the other way, because an ipv4
 	// address can always be embedded in an ipv6 address.
-	if netip.MustParseAddrPort(conn.LocalAddr().String()).Addr().Is6() {
+	if !connIsIPv4(conn) {
 		proto = 58 // Icmp6 number.
 	}
 	msg, err := xicmp.ParseMessage(proto, recv)
@@ -147,4 +163,9 @@ func ReadIcmpEcho(conn *xicmp.PacketConn) (*IcmpResponse, error) {
 
 	resp.Echo = echo
 	return resp, nil
+}
+
+func connIsIPv4(c *xicmp.PacketConn) bool {
+	return c.IPv4PacketConn() != nil
+	//return netip.MustParseAddrPort(conn.LocalAddr().String()).Addr().Is4()
 }
