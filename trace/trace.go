@@ -92,6 +92,9 @@ func TraceRoute(ctx context.Context, dest netip.Addr, opts TraceRouteOptions) (*
 		return nil, fmt.Errorf("could not bind privileged icmp port: %w", err)
 	}
 
+	// First hop is always the source.
+	result.Hops = append(result.Hops, result.Source)
+
 	udpConn, err := icmp.Listen(result.Source)
 	defer udpConn.Close()
 	if err != nil {
