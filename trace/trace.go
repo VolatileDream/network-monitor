@@ -18,10 +18,12 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/netip"
+	"os"
 	"time"
 
 	"web/network-monitor/icmp"
@@ -133,8 +135,11 @@ trace_hops:
 			echo.Seq += 1
 			err := icmp.SendIcmpEcho(udpConn, &echo, result.Dest)
 			if err != nil {
+				if errors.Is(err, net.ErrClosed) {
+					return nil, fmt.Errorf("traceroute failed: %w", err)
+				}
 				// do something reasonable.
-				fmt.Println("err", err)
+				log.Printf("icmp send err: %+v\n", err)
 				continue
 			}
 
@@ -142,11 +147,10 @@ trace_hops:
 			addr, msg, err := icmp.ReadIcmp(icmpConn)
 			if err != nil {
 				// Most errors are probably timeouts.
-				if err.(net.Error).Timeout() {
-					continue
+				if !errors.Is(err, os.ErrDeadlineExceeded) {
+					// do something reasonable...
+					log.Printf("icmp read err: %+v\n", err)
 				}
-				// do something reasonable.
-				fmt.Println("err", err)
 				continue
 			}
 

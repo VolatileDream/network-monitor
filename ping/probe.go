@@ -78,7 +78,7 @@ func sendall(src *monitorsByInterface) {
 			Data: []byte("VolatileDream//web/network-monitor"),
 		}
 		if err := icmp.SendIcmpEcho(src.socket, &echo, dest); err != nil {
-			fmt.Printf("problem with sending packet: %v\n", err)
+			log.Printf("error sending packet: %v\n", err)
 			continue
 		}
 		m.wire = append(m.wire, outstandingPacket{
