@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"time"
 
+	"web/network-monitor/ip"
+
 	xicmp "golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -99,13 +101,9 @@ func ReadIcmp(conn *xicmp.PacketConn) (netip.Addr, *xicmp.Message, error) {
 		return netip.Addr{}, nil, err
 	}
 
-	var recvAddr netip.Addr
-	if origin, err := netip.ParseAddrPort(addr.String()); err == nil {
-		recvAddr = origin.Addr()
-	} else if origin, err := netip.ParseAddr(addr.String()); err == nil {
-		recvAddr = origin
-	} else {
-		return netip.Addr{}, nil, fmt.Errorf("failed to parse into ip address: %s", addr.String())
+	recvAddr, err := ip.Convert(addr)
+	if err != nil {
+		return netip.Addr{}, nil, err
 	}
 
 	proto := 1 // Icmp4 number.
