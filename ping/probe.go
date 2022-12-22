@@ -51,8 +51,8 @@ func (m *monitorsByInterface) nextSeq() uint16 {
 	return n
 }
 
-func pinger(ctx context.Context, src *monitorsByInterface) {
-	ticker := time.NewTicker(1 * time.Second)
+func pinger(ctx context.Context, frequency time.Duration, src *monitorsByInterface) {
+	ticker := time.NewTicker(frequency)
 	defer ticker.Stop()
 
 	for {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"time"
 
 	"web/network-monitor/icmp"
 )
@@ -106,7 +107,7 @@ func (m *Manager) add(ctx context.Context, p ProbeRequest) error {
 		}
 		m.interfaces[p.Source] = monitor
 
-		go pinger(monitorCtx, monitor)
+		go pinger(monitorCtx, time.Second, monitor)
 		go receiver(monitorCtx, monitor)
 	}
 
