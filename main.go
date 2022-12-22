@@ -10,14 +10,18 @@ import (
 	"os/signal"
 	"time"
 
+	"web/network-monitor/config"
 	//"web/network-monitor/icmp"
 	"web/network-monitor/ping"
+	"web/network-monitor/resolve"
 	"web/network-monitor/trace"
 	//"web/network-monitor/telemetry"
 )
 
 var (
 	_ = trace.TraceResult{}
+	_ = config.Config{}
+	_ = resolve.Resolver{}
 )
 
 func main() {
@@ -38,15 +42,16 @@ func main() {
 		fmt.Println("  ", addrs)
 	}
 
-	//*
+	cfg(context.Background())
+
 	res, err := trace.TraceRoute(
 		context.Background(),
 		//netip.MustParseAddr("192.168.100.1"),
 		netip.MustParseAddr("8.8.8.8"),
 		trace.TraceRouteOptions{
-			MaxHops:   8,
-			Retries:   1,
-			Interface: netip.MustParseAddr("192.168.1.117"),
+			MaxHops: 32,
+			Retries: 1,
+			//Interface: netip.MustParseAddr("192.168.1.117"),
 		})
 	fmt.Println(res)
 	fmt.Println(err)
@@ -54,9 +59,39 @@ func main() {
 	names, err := trace.ResolveHops(context.Background(), res.Hops, 2*time.Second)
 	fmt.Println(names)
 	fmt.Println(err)
-	//*/
 
 	return
+}
+
+func cfg(ctx context.Context) {
+	// TODO: load from file regularily
+	c := config.Config{
+		Targets: []config.LatencyTarget{
+			&config.TraceHops{
+				Dest: netip.MustParseAddr("8.8.8.8"),
+				Hop:  2, // not the gateway, but the ISP machine.
+			},
+			&config.StaticIPs{
+				netip.MustParseAddr("192.168.1.1"),
+			},
+		},
+		ResolveInterval: 15 * time.Minute,
+		PingInterval:    time.Second,
+	}
+
+	cfgChan := make(chan config.Config, 1)
+	cfgChan <- c
+
+	resolver, resultChan := resolve.NewResolver(cfgChan)
+
+	go resolver.Run(ctx)
+
+	for results := range resultChan {
+		fmt.Println("another config resolution")
+		for _, res := range results.Resolved {
+			fmt.Printf("%+v\n", res)
+		}
+	}
 }
 
 func run() {
