@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"net/netip"
 	"os"
@@ -42,6 +43,10 @@ const (
 
 	defaultRetries = 3
 	defaultTimeout = 5 * time.Second
+)
+
+var (
+	errNotTtlPacket = fmt.Errorf("not a ttl exceeded packet")
 )
 
 type TraceRouteOptions struct {
@@ -67,6 +72,8 @@ type TraceResult struct {
 }
 
 func TraceRoute(ctx context.Context, dest netip.Addr, opts TraceRouteOptions) (*TraceResult, error) {
+	r := rand.New(rand.NewSource(time.Now().UnixMicro()))
+
 	dest = dest.Unmap() // remove 4in6 weirdness
 	result := &TraceResult{
 		Dest: dest,
@@ -88,6 +95,7 @@ func TraceRoute(ctx context.Context, dest netip.Addr, opts TraceRouteOptions) (*
 	}
 
 	icmpConn, err := icmp.ListenPrivileged(result.Source)
+	defer icmpConn.Close()
 	if err != nil {
 		return nil, fmt.Errorf("could not bind privileged icmp port: %w", err)
 	}
@@ -101,10 +109,20 @@ func TraceRoute(ctx context.Context, dest netip.Addr, opts TraceRouteOptions) (*
 		return nil, fmt.Errorf("icmp socket listen failed: %w", err)
 	}
 
+	var portId int
+	if addr, ok := udpConn.LocalAddr().(*net.UDPAddr); ok {
+		portId = addr.Port
+	} else {
+		log.Printf("traceroute could not determine UDP port number, only detecting packets via random sequence number\n")
+	}
+
 	echo := xicmp.Echo{
-		ID:   0, // can't be set.
-		Seq:  0, // incremented later.
+		// Can't be set by us, but the UDP port is used by the kernel to populate it.
+		// Setting it to that port ourselves makes it easier to reason about.
+		ID:   portId,
+		Seq:  r.Int() & 0xFFFF, // incremented later.
 		Data: []byte("VolatileDream//web/network-monitor"),
+		//Data: []byte("@@@@@@"),
 	}
 
 	tries := defaultRetries
@@ -128,7 +146,10 @@ trace_hops:
 		}
 
 		found := false
-		for attempt := 0; attempt < tries && !found; attempt++ {
+		attemptDeadline := time.Now().Add(time.Duration(tries) * hopTimeout)
+
+	attempt_hop:
+		for attempt := 0; attempt < tries && !found && time.Now().Before(attemptDeadline); attempt++ {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -136,6 +157,7 @@ trace_hops:
 			}
 
 			echo.Seq += 1
+			//log.Printf("sending ID: %d, Seq: %d\n", echo.ID, echo.Seq)
 			err := icmp.SendIcmpEcho(udpConn, &echo, result.Dest)
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) {
@@ -146,27 +168,51 @@ trace_hops:
 				continue
 			}
 
-			icmpConn.SetReadDeadline(time.Now().Add(hopTimeout))
-			addr, msg, err := icmp.ReadIcmp(icmpConn)
-			if err != nil {
-				// Most errors are probably timeouts.
-				if !errors.Is(err, os.ErrDeadlineExceeded) {
-					// do something reasonable...
-					log.Printf("icmp read err: %+v\n", err)
+			hopDeadline := time.Now().Add(hopTimeout)
+			icmpConn.SetReadDeadline(hopDeadline)
+
+			for {
+				// Continue to read packets until we hit the deadline.
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				default:
 				}
-				continue
-			}
 
-			found = true
+				addr, msg, err := icmp.ReadIcmp(icmpConn)
+				if err != nil {
+					// Most errors are probably timeouts.
+					if !errors.Is(err, os.ErrDeadlineExceeded) {
+						// do something reasonable...
+						log.Printf("icmp read err: %+v\n", err)
+					}
+					break
+				}
 
-			result.Hops = append(result.Hops, addr)
+				if msg.Type == ipv4.ICMPTypeTimeExceeded || msg.Type == ipv6.ICMPTypeTimeExceeded {
+					prevMsg, err := parseTimeExceeded(msg)
+					if err != nil {
+						// failed to parse ignore it.
+						continue
+					}
+					if echo.ID != prevMsg.ID || echo.Seq != prevMsg.Seq {
+						// Packet not for us.
+						//log.Printf("ignoring recv ID: %d, Seq: %d\n", prevMsg.ID, prevMsg.Seq)
+						continue
+					}
+					//log.Printf("recv with match ID: %d, Seq: %d\n", prevMsg.ID, prevMsg.Seq)
+				}
 
-			if msg.Type == ipv4.ICMPTypeEchoReply || msg.Type == ipv6.ICMPTypeEchoReply {
-				break trace_hops
-			} else {
-				break
-			}
-		}
+				found = true
+				result.Hops = append(result.Hops, addr)
+
+				if msg.Type == ipv4.ICMPTypeEchoReply || msg.Type == ipv6.ICMPTypeEchoReply {
+					break trace_hops
+				} else {
+					break attempt_hop
+				}
+			} // read loop
+		} // attempt_hop
 
 		if !found {
 			result.Hops = append(result.Hops, netip.Addr{})
@@ -215,4 +261,45 @@ func setTTL(conn *xicmp.PacketConn, ttl int) error {
 		return p.SetHopLimit(ttl)
 	}
 	return fmt.Errorf("unknown connection type: %+v", conn)
+}
+
+func parseTimeExceeded(m *xicmp.Message) (*xicmp.Echo, error) {
+	if m.Type != ipv4.ICMPTypeTimeExceeded && m.Type != ipv6.ICMPTypeTimeExceeded {
+		return nil, errNotTtlPacket
+	}
+	te, ok := m.Body.(*xicmp.TimeExceeded)
+	if !ok {
+		return nil, errNotTtlPacket
+	}
+
+	var protocol int
+	var offset int
+
+	// Handle ipv4
+	if m.Type == ipv4.ICMPTypeTimeExceeded {
+		h, err := ipv4.ParseHeader(te.Data)
+		if err != nil {
+			return nil, fmt.Errorf("no ip header: %w", err)
+		}
+
+		protocol = 1
+		offset = h.Len + len(h.Options)
+
+	} else {
+		// Handle ipv6
+		protocol = 58
+		offset = ipv6.HeaderLen
+	}
+
+	// This message is TRUNCATED.
+	prevMsg, err := xicmp.ParseMessage(protocol, te.Data[offset:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse icmp packet")
+	}
+
+	if prevMsg.Type != ipv4.ICMPTypeEcho && prevMsg.Type != ipv6.ICMPTypeEchoRequest {
+		return nil, fmt.Errorf("not an icmp echo packet")
+	}
+
+	return prevMsg.Body.(*xicmp.Echo), nil
 }
