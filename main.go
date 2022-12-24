@@ -13,29 +13,30 @@ import (
 	"time"
 
 	"web/network-monitor/config"
-	//"web/network-monitor/icmp"
 	"web/network-monitor/ping"
 	"web/network-monitor/resolve"
-	"web/network-monitor/trace"
-	//"web/network-monitor/telemetry"
+	"web/network-monitor/telemetry"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/global"
+	"go.opentelemetry.io/otel/metric/instrument"
+	"go.opentelemetry.io/otel/metric/unit"
 )
 
-var (
-	_ = trace.TraceResult{}
-	_ = config.Config{}
-	_ = resolve.ResolverService{}
-)
+var meter metric.Meter = metric.NewNoopMeter()
 
 func main() {
-	/*
-		cleanup, err := telemetry.Setup()
-		defer cleanup()
+	cleanup, err := telemetry.Setup()
+	defer cleanup()
 
-		if err != nil {
-			fmt.Printf("failed to setup telemetry: %v\n", err)
-			os.Exit(1)
-		}
-	*/
+	if err != nil {
+		fmt.Printf("failed to setup telemetry: %v\n", err)
+		os.Exit(1)
+	}
+
+	// TODO: how does this show in prometheus?
+	meter = global.Meter("netmon")
 
 	// Kill the app on sigint
 	appCtx, appCancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -117,33 +118,6 @@ signal_loop:
 	cancel()
 }
 
-func a() {
-	nets, _ := net.Interfaces()
-	for _, iface := range nets {
-		fmt.Println(iface)
-		addrs, _ := iface.Addrs()
-		fmt.Println("  ", addrs)
-	}
-
-	res, err := trace.TraceRoute(
-		context.Background(),
-		//netip.MustParseAddr("192.168.100.1"),
-		netip.MustParseAddr("8.8.8.8"),
-		trace.TraceRouteOptions{
-			MaxHops: 32,
-			Retries: 1,
-			//Interface: netip.MustParseAddr("192.168.1.117"),
-		})
-	fmt.Println(res)
-	fmt.Println(err)
-
-	names, err := trace.ResolveHops(context.Background(), res.Hops, 2*time.Second)
-	fmt.Println(names)
-	fmt.Println(err)
-
-	return
-}
-
 func glue(ctx context.Context, resolveCh <-chan resolve.Result, m *ping.Manager) {
 	ips := make(map[netip.Addr]struct{})
 
@@ -207,16 +181,10 @@ func loadConfig(ctx context.Context) (*config.Config, error) {
 	// TODO: load from file regularily
 	return &config.Config{
 		Targets: []config.LatencyTarget{
-			//*
-			&config.TraceHops{
-				Dest: netip.MustParseAddr("8.8.8.8"),
-				Hop:  3, // not the gateway, but the ISP machine.
-			},
 			&config.TraceHops{
 				Dest: netip.MustParseAddr("8.8.8.8"),
 				Hop:  2, // not the gateway, but the ISP machine.
 			},
-			//*/
 			&config.TraceHops{
 				Dest: netip.MustParseAddr("8.8.8.8"),
 				Hop:  1, // gateway
@@ -236,7 +204,8 @@ func killserver(ctx context.Context, s *http.Server) {
 	select {
 	case <-ctx.Done():
 	}
-	fmt.Println("running cancel...")
+
+	fmt.Println("server teardown...")
 	c, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -244,13 +213,47 @@ func killserver(ctx context.Context, s *http.Server) {
 	s.Close()
 }
 
+const (
+	hostKey = attribute.Key("remote")
+)
+
 func printResults(ctx context.Context, r <-chan *ping.PingResult) {
+	latencies := make(map[netip.Addr]float64)
+
+	latency, err := meter.SyncFloat64().Histogram(
+		//latency, err := meter.AsyncFloat64().Gauge(
+		"network/latency",
+		instrument.WithUnit(unit.Milliseconds),
+		instrument.WithDescription("Latency from this host to the specified target."))
+	/*
+	   err = meter.RegisterCallback([]instrument.Asynchronous{
+	       latency,
+	     },
+	     func (ctx context.Context) {
+	       for addr, lastMs := range latencies {
+	         latency.Observe(ctx, lastMs, hostKey.String(addr.String()))
+	       }
+	     },
+	   )
+	*/
+	if err != nil {
+		log.Printf("Failed to create metric: %v\n", err)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case result := <-r:
-			fmt.Printf("ping result %s: %s\n", result.Dest, result.Elapsed())
+			millis := float64(result.Elapsed().Microseconds()) / 1000.0
+			latencies[result.Dest] = millis
+
+			//log.Printf("ping result %s: %f\n", result.Dest, millis)
+			//*
+			if latency != nil {
+				latency.Record(ctx, millis, hostKey.String(result.Dest.String()))
+			}
+			//*/
 		}
 	}
 }
