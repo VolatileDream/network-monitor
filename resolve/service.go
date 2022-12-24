@@ -111,6 +111,8 @@ func (r *ResolverService) Run(ctx context.Context) {
 		}
 		expiry.Stop()
 	}
+
+	close(r.results)
 }
 
 func (r *ResolverService) resolve(ctx context.Context, targets []config.LatencyTarget) Result {
