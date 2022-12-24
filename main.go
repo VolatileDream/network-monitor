@@ -21,7 +21,7 @@ import (
 var (
 	_ = trace.TraceResult{}
 	_ = config.Config{}
-	_ = resolve.Resolver{}
+	_ = resolve.ResolverService{}
 )
 
 func main() {
@@ -82,7 +82,7 @@ func cfg(ctx context.Context) {
 	cfgChan := make(chan config.Config, 1)
 	cfgChan <- c
 
-	resolver, resultChan := resolve.NewResolver(cfgChan)
+	resolver, resultChan := resolve.NewService(cfgChan, resolve.DefaultResolver())
 
 	go resolver.Run(ctx)
 
