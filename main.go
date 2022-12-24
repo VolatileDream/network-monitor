@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"web/network-monitor/config"
@@ -35,14 +37,93 @@ func main() {
 		}
 	*/
 
+	// Kill the app on sigint
+	appCtx, appCancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer appCancel()
+
+	firstCfg, err := loadConfig(appCtx)
+	if err != nil {
+		log.Fatal("could not load config: %v\n", err)
+	}
+
+	cfgCh := make(chan config.Config, 1)
+	cfgCh <- *firstCfg
+
+	go signalHandler(appCtx, appCancel, cfgCh)
+
+	resolver, resultCh := resolve.NewService(cfgCh, resolve.DefaultResolver())
+	go resolver.Run(appCtx)
+
+	manager, results := ping.NewManager(100)
+	go manager.Run(appCtx)
+	go printResults(appCtx, results)
+
+	go glue(appCtx, resultCh, manager)
+
+	server := &http.Server{
+		Addr:    "127.0.0.1:9090",
+		Handler: http.DefaultServeMux,
+		BaseContext: func(_ net.Listener) context.Context {
+			fmt.Printf("setup http context\n")
+			// Use appCtx to auto shutdown.
+			return appCtx
+		},
+	}
+	go killserver(appCtx, server)
+
+	t := time.AfterFunc(30*time.Second, func() {
+		appCancel()
+	})
+	defer t.Stop()
+
+	fmt.Printf("running...\n")
+	server.ListenAndServe()
+	fmt.Printf("server exit\n")
+}
+
+func signalHandler(appCtx context.Context, cancel func(), cfgCh chan config.Config) {
+	// this lives for the life of the application.
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGHUP)
+
+signal_loop:
+	for {
+		var sig os.Signal
+
+		select {
+		case <-appCtx.Done():
+			break signal_loop
+		case sig = <-signals:
+		}
+
+		log.Printf("got signal: %s\n", sig)
+
+		if sig == syscall.SIGHUP {
+			// reload cfg
+			log.Printf("reloading config...\n")
+			_, err := loadConfig(appCtx)
+			if err != nil {
+				log.Printf("failed to load config: %v", err)
+			} else {
+				// TODO
+				//cfgCh <- c
+			}
+		} else if sig == syscall.SIGINT {
+			// tear down.
+			break signal_loop
+		}
+	}
+
+	cancel()
+}
+
+func a() {
 	nets, _ := net.Interfaces()
 	for _, iface := range nets {
 		fmt.Println(iface)
 		addrs, _ := iface.Addrs()
 		fmt.Println("  ", addrs)
 	}
-
-	cfg(context.Background())
 
 	res, err := trace.TraceRoute(
 		context.Background(),
@@ -63,75 +144,92 @@ func main() {
 	return
 }
 
-func cfg(ctx context.Context) {
+func glue(ctx context.Context, resolveCh <-chan resolve.Result, m *ping.Manager) {
+	ips := make(map[netip.Addr]struct{})
+
+	for {
+		var r resolve.Result
+		select {
+		case <-ctx.Done():
+			return
+		case r = <-resolveCh:
+		}
+
+		log.Printf("config resolved: %v\n", r)
+
+		newIps := make(map[netip.Addr]struct{})
+		for _, resolution := range r.Resolved {
+			if resolution.Error != nil {
+				log.Printf("failed to resolve '%s': %v", resolution.Target, resolution.Error)
+			} else {
+				for _, addr := range resolution.Addrs {
+					if addr.IsValid() {
+						newIps[addr] = struct{}{}
+					}
+				}
+			}
+		}
+
+		remove := 0
+		for ip, _ := range ips {
+			if _, ok := newIps[ip]; !ok {
+				remove += 1
+				pr := prFromIp(ip)
+				m.Remove(ctx, pr)
+			}
+		}
+		add := 0
+		for ip, _ := range newIps {
+			if _, ok := ips[ip]; !ok {
+				add += 1
+				pr := prFromIp(ip)
+				m.Add(ctx, pr)
+			}
+		}
+		ips = newIps // overwrite
+
+		log.Printf("updated %d probe endpoints\n", remove+add)
+	}
+}
+
+func prFromIp(ip netip.Addr) ping.ProbeRequest {
+	pr := ping.ProbeRequest{
+		Source:      netip.IPv6Unspecified(),
+		Destination: ip,
+	}
+	if ip.Is4() {
+		pr.Source = netip.IPv4Unspecified()
+	}
+	return pr
+}
+
+func loadConfig(ctx context.Context) (*config.Config, error) {
 	// TODO: load from file regularily
-	c := config.Config{
+	return &config.Config{
 		Targets: []config.LatencyTarget{
+			//*
+			&config.TraceHops{
+				Dest: netip.MustParseAddr("8.8.8.8"),
+				Hop:  3, // not the gateway, but the ISP machine.
+			},
 			&config.TraceHops{
 				Dest: netip.MustParseAddr("8.8.8.8"),
 				Hop:  2, // not the gateway, but the ISP machine.
 			},
-			&config.StaticIPs{
-				netip.MustParseAddr("192.168.1.1"),
+			//*/
+			&config.TraceHops{
+				Dest: netip.MustParseAddr("8.8.8.8"),
+				Hop:  1, // gateway
 			},
+			/*
+				&config.StaticIPs{
+					netip.MustParseAddr("192.168.1.1"),
+				},
+			*/
 		},
 		ResolveInterval: 15 * time.Minute,
 		PingInterval:    time.Second,
-	}
-
-	cfgChan := make(chan config.Config, 1)
-	cfgChan <- c
-
-	resolver, resultChan := resolve.NewService(cfgChan, resolve.DefaultResolver())
-
-	go resolver.Run(ctx)
-
-	for results := range resultChan {
-		fmt.Println("another config resolution")
-		for _, res := range results.Resolved {
-			fmt.Printf("%+v\n", res)
-		}
-	}
-}
-
-func run() {
-	// Kill the app on sigint
-	appCtx, appCancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer appCancel()
-
-	manager, results := ping.NewManager(100)
-	go manager.Run(appCtx)
-	go printResults(appCtx, results)
-
-	manager.Add(appCtx, ping.ProbeRequest{
-		Source:      netip.MustParseAddr("192.168.1.117"),
-		Destination: netip.MustParseAddr("192.168.1.1"),
-	})
-	manager.Add(appCtx, ping.ProbeRequest{
-		Source:      netip.MustParseAddr("192.168.1.117"),
-		Destination: netip.MustParseAddr("192.168.100.1"),
-	})
-
-	s := &http.Server{
-		Addr:    "127.0.0.1:9090",
-		Handler: http.DefaultServeMux,
-		BaseContext: func(_ net.Listener) context.Context {
-			fmt.Printf("setup http context\n")
-			// Use appCtx to auto shutdown.
-			return appCtx
-		},
-	}
-	go killserver(appCtx, s)
-
-	// Build up application
-	t := time.AfterFunc(30*time.Second, func() {
-		appCancel()
-	})
-	defer t.Stop()
-
-	fmt.Printf("running...\n")
-	s.ListenAndServe()
-	fmt.Printf("server exit\n")
+	}, nil
 }
 
 func killserver(ctx context.Context, s *http.Server) {
