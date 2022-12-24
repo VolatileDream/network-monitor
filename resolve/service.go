@@ -73,17 +73,17 @@ func (r *ResolverService) Run(ctx context.Context) {
 	}
 
 	// Force a resolution immediately.
-	ticker := time.NewTicker(time.Millisecond)
-	defer ticker.Stop()
+	timer := time.NewTimer(time.Millisecond)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case config = <-r.loader:
-			ticker.Reset(config.ResolveInterval)
-		case <-ticker.C:
-			ticker.Reset(config.ResolveInterval)
+			timer.Reset(config.ResolveInterval)
+		case <-timer.C:
+			timer.Reset(config.ResolveInterval)
 		}
 
 		// If we can't resolve everything quickly relative to the interval,
