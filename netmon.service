@@ -1,0 +1,25 @@
+[Unit]
+Description=Network Monitor
+After=syslog.target network.target
+
+[Service]
+Type=simple
+User=netmon
+Group=netmon
+ExecStart=/home/netmon/network-monitor
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=control-group
+Restart=always
+RestartSec=18s
+
+# Optional security enhancements
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/home/netmon
+# For raw icmp socket usage.
+AmbientCapabilities=CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target
+
