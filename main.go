@@ -35,7 +35,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO: how does this show in prometheus?
 	meter = global.Meter("netmon")
 
 	// Kill the app on sigint
@@ -65,21 +64,14 @@ func main() {
 		Addr:    "127.0.0.1:9090",
 		Handler: http.DefaultServeMux,
 		BaseContext: func(_ net.Listener) context.Context {
-			fmt.Printf("setup http context\n")
 			// Use appCtx to auto shutdown.
 			return appCtx
 		},
 	}
 	go killserver(appCtx, server)
 
-	t := time.AfterFunc(30*time.Second, func() {
-		appCancel()
-	})
-	defer t.Stop()
-
 	fmt.Printf("running...\n")
 	server.ListenAndServe()
-	fmt.Printf("server exit\n")
 }
 
 func signalHandler(appCtx context.Context, cancel func(), cfgCh chan config.Config) {
@@ -218,24 +210,11 @@ const (
 )
 
 func printResults(ctx context.Context, r <-chan *ping.PingResult) {
-	latencies := make(map[netip.Addr]float64)
-
 	latency, err := meter.SyncFloat64().Histogram(
-		//latency, err := meter.AsyncFloat64().Gauge(
 		"network/latency",
 		instrument.WithUnit(unit.Milliseconds),
 		instrument.WithDescription("Latency from this host to the specified target."))
-	/*
-	   err = meter.RegisterCallback([]instrument.Asynchronous{
-	       latency,
-	     },
-	     func (ctx context.Context) {
-	       for addr, lastMs := range latencies {
-	         latency.Observe(ctx, lastMs, hostKey.String(addr.String()))
-	       }
-	     },
-	   )
-	*/
+
 	if err != nil {
 		log.Printf("Failed to create metric: %v\n", err)
 	}
@@ -246,14 +225,10 @@ func printResults(ctx context.Context, r <-chan *ping.PingResult) {
 			return
 		case result := <-r:
 			millis := float64(result.Elapsed().Microseconds()) / 1000.0
-			latencies[result.Dest] = millis
-
 			//log.Printf("ping result %s: %f\n", result.Dest, millis)
-			//*
 			if latency != nil {
 				latency.Record(ctx, millis, hostKey.String(result.Dest.String()))
 			}
-			//*/
 		}
 	}
 }
