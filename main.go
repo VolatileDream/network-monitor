@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -24,9 +25,16 @@ import (
 	"go.opentelemetry.io/otel/metric/unit"
 )
 
+var (
+	bindFlag = flag.String("bind",
+		"127.0.0.1:9090",
+		"Host and port to bind to for prometheus metrics export.")
+)
+
 var meter metric.Meter = metric.NewNoopMeter()
 
 func main() {
+	flag.Parse()
 	cleanup, err := telemetry.Setup()
 	defer cleanup()
 
@@ -61,7 +69,7 @@ func main() {
 	go glue(appCtx, resultCh, manager)
 
 	server := &http.Server{
-		Addr:    "127.0.0.1:9090",
+		Addr:    *bindFlag,
 		Handler: http.DefaultServeMux,
 		BaseContext: func(_ net.Listener) context.Context {
 			// Use appCtx to auto shutdown.
