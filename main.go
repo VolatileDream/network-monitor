@@ -79,7 +79,7 @@ func main() {
 	go killserver(appCtx, server)
 
 	fmt.Printf("running...\n")
-	server.ListenAndServe()
+	log.Fatal(server.ListenAndServe())
 }
 
 func signalHandler(appCtx context.Context, cancel func(), cfgCh chan config.Config) {
