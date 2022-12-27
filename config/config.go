@@ -32,7 +32,7 @@ type Config struct {
 type LatencyTarget interface {
 	fmt.Stringer
 
-  // TODO: move this out to web/network-monitor/resolve
+	// TODO: move this out to web/network-monitor/resolve
 	Resolve(context.Context, *net.Resolver) ([]netip.Addr, error)
 }
 
@@ -84,15 +84,17 @@ func (s *TraceHops) String() string {
 	return fmt.Sprintf("TraceHops{Dest:%s, Hop:%d}", s.Dest, s.Hop)
 }
 
-type StaticIPs []netip.Addr
-
-var _ LatencyTarget = &StaticIPs{}
-
-func (s *StaticIPs) Resolve(_ context.Context, _ *net.Resolver) ([]netip.Addr, error) {
-	return *s, nil
+type StaticIP struct {
+	IP netip.Addr
 }
-func (s *StaticIPs) String() string {
-	return fmt.Sprintf("StaticIps{%+v}", []netip.Addr(*s))
+
+var _ LatencyTarget = &StaticIP{}
+
+func (s *StaticIP) Resolve(_ context.Context, _ *net.Resolver) ([]netip.Addr, error) {
+	return []netip.Addr{s.IP}, nil
+}
+func (s *StaticIP) String() string {
+	return fmt.Sprintf("StaticIps{%+v}", s.IP)
 }
 
 type HostnameTarget struct {
