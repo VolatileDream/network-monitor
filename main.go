@@ -51,7 +51,7 @@ func main() {
 
 	firstCfg, err := loadConfig(appCtx)
 	if err != nil {
-		log.Fatal("could not load config: %v\n", err)
+		log.Fatalf("could not load config: %v\n", err)
 	}
 
 	cfgCh := make(chan config.Config, 1)

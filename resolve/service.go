@@ -76,10 +76,11 @@ func (r *ResolverService) Run(ctx context.Context) {
 	timer := time.NewTimer(time.Millisecond)
 	defer timer.Stop()
 
+resolve_loop:
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			break resolve_loop
 		case config = <-r.loader:
 			timer.Reset(config.ResolveInterval)
 		case <-timer.C:
