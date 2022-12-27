@@ -10,6 +10,11 @@ import (
 	"web/network-monitor/trace"
 )
 
+const (
+	SmallestResolveInterval = time.Minute
+	SmallestPingInterval    = 10 * time.Millisecond
+)
+
 type Config struct {
 	// Targets are the destinations to monitor for connection latency.
 	Targets []LatencyTarget

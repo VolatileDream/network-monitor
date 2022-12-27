@@ -29,6 +29,9 @@ var (
 	bindFlag = flag.String("bind",
 		"127.0.0.1:9090",
 		"Host and port to bind to for prometheus metrics export.")
+	cfgFlag = flag.String("config",
+		"config.json",
+		"Json encoded configuration file to use.")
 )
 
 var meter metric.Meter = metric.NewNoopMeter()
@@ -102,12 +105,11 @@ signal_loop:
 		if sig == syscall.SIGHUP {
 			// reload cfg
 			log.Printf("reloading config...\n")
-			_, err := loadConfig(appCtx)
+			c, err := loadConfig(appCtx)
 			if err != nil {
 				log.Printf("failed to load config: %v", err)
 			} else {
-				// TODO
-				//cfgCh <- c
+				cfgCh <- *c
 			}
 		} else if sig == syscall.SIGINT {
 			// tear down.
@@ -178,26 +180,28 @@ func prFromIp(ip netip.Addr) ping.ProbeRequest {
 }
 
 func loadConfig(ctx context.Context) (*config.Config, error) {
-	// TODO: load from file regularily
-	return &config.Config{
-		Targets: []config.LatencyTarget{
-			&config.TraceHops{
-				Dest: netip.MustParseAddr("8.8.8.8"),
-				Hop:  2, // not the gateway, but the ISP machine.
-			},
-			&config.TraceHops{
-				Dest: netip.MustParseAddr("8.8.8.8"),
-				Hop:  1, // gateway
-			},
-			/*
-				&config.StaticIPs{
-					netip.MustParseAddr("192.168.1.1"),
-				},
-			*/
-		},
-		ResolveInterval: 15 * time.Minute,
-		PingInterval:    time.Second,
-	}, nil
+	file, err := os.Open(*cfgFlag)
+	defer file.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config: %w", err)
+	}
+
+	c, err := config.ParseConfig(file)
+	if err != nil {
+		return nil, err
+	}
+
+	if c.ResolveInterval < config.SmallestResolveInterval {
+		log.Printf("configured resolve interval is lower than the minimum allowed: %v < %v\n", c.ResolveInterval, config.SmallestResolveInterval)
+		c.ResolveInterval = config.SmallestResolveInterval
+	}
+
+	if c.PingInterval < config.SmallestPingInterval {
+		log.Printf("configured ping interval is lower than the minimum allowed: %v < %v\n", c.PingInterval, config.SmallestPingInterval)
+		c.PingInterval = config.SmallestPingInterval
+	}
+
+	return c, nil
 }
 
 func killserver(ctx context.Context, s *http.Server) {
