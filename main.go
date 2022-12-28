@@ -29,9 +29,6 @@ var (
 	bindFlag = flag.String("bind",
 		"127.0.0.1:9090",
 		"Host and port to bind to for prometheus metrics export.")
-	cfgFlag = flag.String("config",
-		"config.json",
-		"Json encoded configuration file to use.")
 )
 
 var meter metric.Meter = metric.NewNoopMeter()
@@ -52,7 +49,7 @@ func main() {
 	appCtx, appCancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer appCancel()
 
-	firstCfg, err := loadConfig(appCtx)
+	firstCfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("could not load config: %v\n", err)
 	}
@@ -105,7 +102,7 @@ signal_loop:
 		if sig == syscall.SIGHUP {
 			// reload cfg
 			log.Printf("reloading config...\n")
-			c, err := loadConfig(appCtx)
+			c, err := config.LoadConfig()
 			if err != nil {
 				log.Printf("failed to load config: %v", err)
 			} else {
@@ -177,31 +174,6 @@ func prFromIp(ip netip.Addr) ping.ProbeRequest {
 		pr.Source = netip.IPv4Unspecified()
 	}
 	return pr
-}
-
-func loadConfig(ctx context.Context) (*config.Config, error) {
-	file, err := os.Open(*cfgFlag)
-	defer file.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
-	}
-
-	c, err := config.ParseConfig(file)
-	if err != nil {
-		return nil, err
-	}
-
-	if c.ResolveInterval < config.SmallestResolveInterval {
-		log.Printf("configured resolve interval is lower than the minimum allowed: %v < %v\n", c.ResolveInterval, config.SmallestResolveInterval)
-		c.ResolveInterval = config.SmallestResolveInterval
-	}
-
-	if c.PingInterval < config.SmallestPingInterval {
-		log.Printf("configured ping interval is lower than the minimum allowed: %v < %v\n", c.PingInterval, config.SmallestPingInterval)
-		c.PingInterval = config.SmallestPingInterval
-	}
-
-	return c, nil
 }
 
 func killserver(ctx context.Context, s *http.Server) {

@@ -2,9 +2,12 @@ package config
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
+	"os"
 	"time"
 
 	"web/network-monitor/trace"
@@ -14,6 +17,37 @@ const (
 	SmallestResolveInterval = time.Minute
 	SmallestPingInterval    = 10 * time.Millisecond
 )
+
+var (
+	cfgFlag = flag.String("config",
+		"config.json",
+		"Json encoded configuration file to use.")
+)
+
+func LoadConfig() (*Config, error) {
+	file, err := os.Open(*cfgFlag)
+	defer file.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config: %w", err)
+	}
+
+	c, err := ParseConfig(file)
+	if err != nil {
+		return nil, err
+	}
+
+	if c.ResolveInterval < SmallestResolveInterval {
+		log.Printf("configured resolve interval is lower than the minimum allowed: %v < %v\n", c.ResolveInterval, SmallestResolveInterval)
+		c.ResolveInterval = SmallestResolveInterval
+	}
+
+	if c.PingInterval < SmallestPingInterval {
+		log.Printf("configured ping interval is lower than the minimum allowed: %v < %v\n", c.PingInterval, SmallestPingInterval)
+		c.PingInterval = SmallestPingInterval
+	}
+
+	return c, nil
+}
 
 type Config struct {
 	// Targets are the destinations to monitor for connection latency.
