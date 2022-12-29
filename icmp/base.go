@@ -28,8 +28,8 @@ func Listen(ip netip.Addr) (*xicmp.PacketConn, error) {
 }
 
 // ListenPrivileged requires privileged access on the system (eg: root or
-// CAP_NET_BIND_SERVICE on linux). But with this access is capable of sending
-// and receiving more types of icmp messages, ex: this will receive TTL Exceeded.
+// CAP_NET_RAW on linux). But with this access is capable of sending and
+// receiving more types of icmp messages, ex: this will receive TTL Exceeded.
 func ListenPrivileged(ip netip.Addr) (*xicmp.PacketConn, error) {
 	return listen(ip, icmpCfg)
 }
@@ -81,7 +81,6 @@ func SendIcmpEcho(i *xicmp.PacketConn, e *xicmp.Echo, addr netip.Addr) error {
 
 	_, err = i.WriteTo(b, &net.UDPAddr{
 		IP: addr.AsSlice(),
-		//Port: traceroutePort,
 	})
 	return err
 }
