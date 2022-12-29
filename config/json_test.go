@@ -80,7 +80,7 @@ func Test_Parse(t *testing.T) {
 						IP: netip.MustParseAddr("192.168.1.1"),
 					},
 					&HostnameTarget{
-						Name: "pkg.go.dev",
+						Host: "pkg.go.dev",
 					},
 				},
 				ResolveInterval: 10 * time.Minute,

@@ -90,7 +90,7 @@ func Test_ResolverService_WaitsForAllTargetsBeforeResolving(t *testing.T) {
 	c <- config.Config{
 		Targets: []config.LatencyTarget{
 			&config.HostnameTarget{
-				Name: "test-host",
+				Host: "test-host",
 			},
 		},
 		ResolveInterval: time.Hour,

@@ -83,7 +83,7 @@ func ParseConfig(r io.Reader) (*Config, error) {
 
 	for _, h := range j.Hosts {
 		c.Targets = append(c.Targets, &HostnameTarget{
-			Name: h,
+			Host: h,
 		})
 	}
 

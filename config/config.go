@@ -137,15 +137,15 @@ func (s *StaticIP) String() string {
 }
 
 type HostnameTarget struct {
-	Name string
+	Host string
 }
 
 var _ LatencyTarget = &HostnameTarget{}
 
 func (s *HostnameTarget) Resolve(ctx context.Context, r *net.Resolver) ([]netip.Addr, error) {
-	return r.LookupNetIP(ctx, "ip", s.Name)
+	return r.LookupNetIP(ctx, "ip", s.Host)
 }
 
 func (s *HostnameTarget) String() string {
-	return fmt.Sprintf("Hostname{Name:%s}", s.Name)
+	return fmt.Sprintf("Hostname{Host:%s}", s.Host)
 }
