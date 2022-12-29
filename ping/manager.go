@@ -2,11 +2,11 @@ package ping
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"net/netip"
-	"time"
 
-	"web/network-monitor/icmp"
+	"web/network-monitor/config"
+	"web/network-monitor/resolve"
 )
 
 type ProbeRequest struct {
@@ -15,149 +15,119 @@ type ProbeRequest struct {
 	Destination netip.Addr
 }
 
-type rpc struct {
-	add      *ProbeRequest
-	remove   *ProbeRequest
-	list     bool
-	response chan<- []ProbeRequest
-}
-
 // Manager manages the ping workers, and sockets required to monitor
 // network latency.
 type Manager struct {
-	rpcs       chan rpc
-	results    chan *PingResult
-	interfaces map[netip.Addr]*monitorsByInterface
+	pingerV4 *pinger
+	pingerV6 *pinger
+
+	configCh  <-chan config.Config
+	resolveCh <-chan resolve.Result
+	results   chan *PingResult
+
+	// Targets that resolved without error.
+	targets []resolve.Resolution
 }
 
-func NewManager(bufsz int) (*Manager, <-chan *PingResult) {
+func NewManager(bufsz int, configCh <-chan config.Config, resolveCh <-chan resolve.Result) (*Manager, <-chan *PingResult) {
 	m := &Manager{
-		rpcs:       make(chan rpc),
-		results:    make(chan *PingResult, bufsz),
-		interfaces: make(map[netip.Addr]*monitorsByInterface),
+		configCh:  configCh,
+		resolveCh: resolveCh,
+		results:   make(chan *PingResult, bufsz),
 	}
 	return m, m.results
 }
 
-func (p *Manager) Add(ctx context.Context, pr ProbeRequest) {
-	p.do(ctx, rpc{
-		add: &pr,
-	})
-}
-func (p *Manager) Remove(ctx context.Context, pr ProbeRequest) {
-	p.do(ctx, rpc{
-		remove: &pr,
-	})
-}
-func (p *Manager) List(ctx context.Context) []ProbeRequest {
-	return p.do(ctx, rpc{
-		list: true,
-	})
-}
-func (p *Manager) do(ctx context.Context, r rpc) []ProbeRequest {
-	responseCh := make(chan []ProbeRequest)
-	r.response = responseCh
-	p.rpcs <- r
-
-	select {
-	case <-ctx.Done():
-		return []ProbeRequest{}
-	case resp := <-responseCh:
-		return resp
+func (m *Manager) Run(ctx context.Context) error {
+	{
+		// Wait for a config & resolution.
+		c := <-m.configCh
+		r := <-m.resolveCh
+		m.initPinger(ctx, c, r)
 	}
-}
-func (p *Manager) Run(ctx context.Context) error {
+
 	for {
-		var req rpc
-		var resp []ProbeRequest
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case req = <-p.rpcs:
-		}
 
-		if req.add != nil {
-			p.add(ctx, *req.add)
-		} else if req.remove != nil {
-			p.remove(*req.remove)
-		} else if req.list {
-			resp = p.list()
-		}
+		case c := <-m.configCh:
+			m.updateConfig(c)
 
-		req.response <- resp
+		case r := <-m.resolveCh:
+			m.updateTargets(r)
+		}
 	}
 }
 
-func (m *Manager) add(ctx context.Context, p ProbeRequest) error {
-	mon, ok := m.interfaces[p.Source]
-	if !ok {
-		socket, err := icmp.Listen(p.Source)
-		if err != nil {
-			return fmt.Errorf("could not listen: %w", err)
-		}
-		// Setup and start the monitor.
-		monitorCtx, monitorCancel := context.WithCancel(ctx)
-		monitor := &monitorsByInterface{
-			cancel:   monitorCancel,
-			source:   p.Source,
-			socket:   socket,
-			result:   m.results,
-			monitors: make(map[netip.Addr]*monitor),
-			sequence: 1,
-		}
-		m.interfaces[p.Source] = monitor
-
-		go pinger(monitorCtx, time.Second, monitor)
-		go receiver(monitorCtx, monitor)
-	}
-
-	// Guaranteed now.
-	mon = m.interfaces[p.Source]
-
-	mon.lock.Lock()
-	defer mon.lock.Unlock()
-
-	if _, ok := mon.monitors[p.Destination]; ok {
-		return fmt.Errorf("address already added: %s", p.Destination)
-	}
-
-	mon.monitors[p.Destination] = &monitor{
-		dest: p.Destination,
-		wire: nil,
-	}
-
-	return nil
+func (m *Manager) updateConfig(c config.Config) {
+	m.pingerV4.interval = c.PingInterval
+	m.pingerV6.interval = c.PingInterval
 }
-func (m *Manager) remove(p ProbeRequest) {
-	mon, ok := m.interfaces[p.Source]
-	if !ok {
-		return
-	}
 
-	mon.lock.Lock()
-	defer mon.lock.Unlock()
-
-	delete(mon.monitors, p.Destination)
-
-	if len(mon.monitors) == 0 {
-		// Receiver cleans up the socket.
-		mon.cancel()
-		delete(m.interfaces, p.Source)
-	}
-}
-func (m *Manager) list() []ProbeRequest {
-	// We're at least going to have at least 1 per interface.
-	reqs := make([]ProbeRequest, 0, len(m.interfaces))
-	for _, monitor := range m.interfaces {
-		monitor.lock.Lock()
-		for dest, _ := range monitor.monitors {
-			reqs = append(reqs, ProbeRequest{
-				Source:      monitor.source,
-				Destination: dest,
-			})
+func (m *Manager) updateTargets(r resolve.Result) {
+	newAddrs := make(map[netip.Addr]struct{})
+	targets := make([]resolve.Resolution, 0, len(r.Resolved))
+	for _, resolution := range r.Resolved {
+		if resolution.Error != nil {
+			log.Printf("failed to resolve '%s': %v", resolution.Target, resolution.Error)
+		} else {
+			targets = append(targets, resolution)
+			for _, ip := range resolution.Addrs {
+				newAddrs[ip] = struct{}{}
+			}
 		}
-		monitor.lock.Unlock()
 	}
 
-	return reqs
+	// Update the ping targets before we compute stats.
+	prev := m.targets
+	m.targets = targets
+
+	addrs := make(map[netip.Addr]struct{})
+	for _, resolution := range prev {
+		for _, ip := range resolution.Addrs {
+			addrs[ip] = struct{}{}
+		}
+	}
+
+	add := 0
+	for ip, _ := range newAddrs {
+		if _, ok := addrs[ip]; !ok {
+			add += 1
+		}
+	}
+
+	remove := 0
+	for ip, _ := range addrs {
+		if _, ok := newAddrs[ip]; !ok {
+			remove += 1
+		}
+		m.pingerV4.remove(ip)
+		m.pingerV6.remove(ip)
+	}
+
+	m.pingerV4.targets = targets
+	m.pingerV6.targets = targets
+
+	log.Printf("updated %d probe endpoints\n", remove+add)
+}
+
+func (m *Manager) initPinger(ctx context.Context, c config.Config, r resolve.Result) {
+	m.pingerV4 = &pinger{
+		result:   m.results,
+		monitors: make(map[netip.Addr]*monitor),
+	}
+	m.pingerV6 = &pinger{
+		result:   m.results,
+		monitors: make(map[netip.Addr]*monitor),
+	}
+	m.updateConfig(c)
+	m.updateTargets(r)
+
+	if err := m.pingerV4.start(ctx, netip.IPv4Unspecified()); err != nil {
+		log.Printf("failed to start ipv4 pinger: %v", err)
+	}
+	if err := m.pingerV6.start(ctx, netip.IPv6Unspecified()); err != nil {
+		log.Printf("failed to start ipv6 pinger: %v", err)
+	}
 }

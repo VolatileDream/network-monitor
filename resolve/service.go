@@ -130,6 +130,7 @@ func (r *ResolverService) resolve(ctx context.Context, targets []config.LatencyT
 		go func(t config.LatencyTarget) {
 			defer wg.Done()
 			addrs, err := r.resolver.Resolve(ctx, t)
+			log.Printf("resolving: %s...\n", t.MetricName())
 
 			rlock.Lock()
 			defer rlock.Unlock()

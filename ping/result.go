@@ -3,6 +3,8 @@ package ping
 import (
 	"net/netip"
 	"time"
+
+	"web/network-monitor/config"
 )
 
 type PingResult struct {
@@ -10,8 +12,11 @@ type PingResult struct {
 	// optional time, recv is 0 when the packet was never received,
 	// or returned out of order.
 	Recv time.Time
-	Src  netip.Addr
+	Src  netip.Addr // TODO: remove?
 	Dest netip.Addr
+
+	// Target associated with this ping request.
+	Target config.LatencyTarget
 }
 
 // Elapsed returns a negative duration if PingResult.recv was zero.

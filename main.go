@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/netip"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,8 +30,6 @@ var (
 		"Host and port to bind to for prometheus metrics export.")
 )
 
-var meter metric.Meter = metric.NewNoopMeter()
-
 func main() {
 	flag.Parse()
 	cleanup, err := telemetry.Setup()
@@ -43,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	meter = global.Meter("netmon")
+	initMeter()
 
 	// Kill the app on sigint
 	appCtx, appCancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -54,19 +51,20 @@ func main() {
 		log.Fatalf("could not load config: %v\n", err)
 	}
 
+	// Split the configuration channel in two:
+	// one for the Resolver, and another for the ping manager.
 	cfgCh := make(chan config.Config, 1)
 	cfgCh <- *firstCfg
+	c1, c2 := split(appCtx, cfgCh)
 
 	go signalHandler(appCtx, appCancel, cfgCh)
 
-	resolver, resultCh := resolve.NewService(cfgCh, resolve.DefaultResolver())
+	resolver, resultCh := resolve.NewService(c1, resolve.DefaultResolver())
 	go resolver.Run(appCtx)
 
-	manager, results := ping.NewManager(100)
+	manager, results := ping.NewManager(100, c2, resultCh)
 	go manager.Run(appCtx)
 	go printResults(appCtx, results)
-
-	go glue(appCtx, resultCh, manager)
 
 	server := &http.Server{
 		Addr:    *bindFlag,
@@ -80,6 +78,23 @@ func main() {
 
 	fmt.Printf("running...\n")
 	log.Fatal(server.ListenAndServe())
+}
+
+func split(ctx context.Context, c <-chan config.Config) (<-chan config.Config, <-chan config.Config) {
+	one := make(chan config.Config, 1)
+	two := make(chan config.Config, 1)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case cfg := <-c:
+			one <- cfg
+			two <- cfg
+		}
+	}()
+
+	return one, two
 }
 
 func signalHandler(appCtx context.Context, cancel func(), cfgCh chan config.Config) {
@@ -117,65 +132,6 @@ signal_loop:
 	cancel()
 }
 
-func glue(ctx context.Context, resolveCh <-chan resolve.Result, m *ping.Manager) {
-	ips := make(map[netip.Addr]struct{})
-
-	for {
-		var r resolve.Result
-		select {
-		case <-ctx.Done():
-			return
-		case r = <-resolveCh:
-		}
-
-		log.Printf("config resolved: %v\n", r)
-
-		newIps := make(map[netip.Addr]struct{})
-		for _, resolution := range r.Resolved {
-			if resolution.Error != nil {
-				log.Printf("failed to resolve '%s': %v", resolution.Target, resolution.Error)
-			} else {
-				for _, addr := range resolution.Addrs {
-					if addr.IsValid() {
-						newIps[addr] = struct{}{}
-					}
-				}
-			}
-		}
-
-		remove := 0
-		for ip, _ := range ips {
-			if _, ok := newIps[ip]; !ok {
-				remove += 1
-				pr := prFromIp(ip)
-				m.Remove(ctx, pr)
-			}
-		}
-		add := 0
-		for ip, _ := range newIps {
-			if _, ok := ips[ip]; !ok {
-				add += 1
-				pr := prFromIp(ip)
-				m.Add(ctx, pr)
-			}
-		}
-		ips = newIps // overwrite
-
-		log.Printf("updated %d probe endpoints\n", remove+add)
-	}
-}
-
-func prFromIp(ip netip.Addr) ping.ProbeRequest {
-	pr := ping.ProbeRequest{
-		Source:      netip.IPv6Unspecified(),
-		Destination: ip,
-	}
-	if ip.Is4() {
-		pr.Source = netip.IPv4Unspecified()
-	}
-	return pr
-}
-
 func killserver(ctx context.Context, s *http.Server) {
 	select {
 	case <-ctx.Done():
@@ -189,9 +145,16 @@ func killserver(ctx context.Context, s *http.Server) {
 	s.Close()
 }
 
+var meter metric.Meter = metric.NewNoopMeter()
+
 const (
-	hostKey = attribute.Key("remote")
+	addrKey = attribute.Key("remote")
+	nameKey = attribute.Key("name")
 )
+
+func initMeter() {
+	meter = global.Meter("netmon")
+}
 
 func printResults(ctx context.Context, r <-chan *ping.PingResult) {
 	latency, err := meter.SyncFloat64().Histogram(
@@ -211,7 +174,10 @@ func printResults(ctx context.Context, r <-chan *ping.PingResult) {
 			millis := float64(result.Elapsed().Microseconds()) / 1000.0
 			//log.Printf("ping result %s: %f\n", result.Dest, millis)
 			if latency != nil {
-				latency.Record(ctx, millis, hostKey.String(result.Dest.String()))
+				latency.Record(ctx,
+					millis,
+					addrKey.String(result.Dest.String()),
+					nameKey.String(result.Target.MetricName()))
 			}
 		}
 	}
