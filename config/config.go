@@ -136,7 +136,8 @@ func (s *TraceHops) String() string {
 }
 
 type StaticIP struct {
-	IP netip.Addr
+	Name string
+	IP   netip.Addr
 }
 
 var _ LatencyTarget = &StaticIP{}
@@ -145,13 +146,14 @@ func (s *StaticIP) Resolve(_ context.Context, _ *net.Resolver) ([]netip.Addr, er
 	return []netip.Addr{s.IP}, nil
 }
 func (s *StaticIP) MetricName() string {
-	return fmt.Sprintf("static-ip:%s", s.IP)
+	return s.Name
 }
 func (s *StaticIP) String() string {
-	return fmt.Sprintf("StaticIps{%+v}", s.IP)
+	return fmt.Sprintf("StaticIps{Name:%s, IP:%+v}", s.Name, s.IP)
 }
 
 type HostnameTarget struct {
+	Name string
 	Host string
 }
 
@@ -162,10 +164,10 @@ func (s *HostnameTarget) Resolve(ctx context.Context, r *net.Resolver) ([]netip.
 	return noMixIp(addrs), err
 }
 func (s *HostnameTarget) MetricName() string {
-	return fmt.Sprintf("host:%s", s.Host)
+	return s.Name
 }
 func (s *HostnameTarget) String() string {
-	return fmt.Sprintf("Hostname{Host:%s}", s.Host)
+	return fmt.Sprintf("Hostname{Name:%s, Host:%s}", s.Name, s.Host)
 }
 
 func noMixIp(addrs []netip.Addr) []netip.Addr {

@@ -4,8 +4,12 @@
     {"name": "isp-hop", "destination": "8.8.8.8", "hop": 2}
   ],
   "static": [
+    {"name": "dns", "ip": "8.8.8.8"},
+    {"name": "local", "ip": "127.0.0.1"}
   ],
-  "hosts":[],
+  "hosts":[
+    {"name": "example", "host": "example.com"}
+  ],
   "resolve-interval": "15m",
   "ping-interval": "1s"
 }
