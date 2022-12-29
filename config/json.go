@@ -24,6 +24,7 @@ type JsonConfig struct {
 }
 
 type JsonTraceHop struct {
+	Name        string `json:"name"`
 	Destination string `json:"destination"`
 	Hop         int    `json:"hop"`
 }

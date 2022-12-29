@@ -1,7 +1,7 @@
 {
   "hops": [
-    {"destination": "8.8.8.8", "hop": 1},
-    {"destination": "8.8.8.8", "hop": 2}
+    {"name": "gateway", "destination": "8.8.8.8", "hop": 1},
+    {"name": "isp-hop", "destination": "8.8.8.8", "hop": 2}
   ],
   "static": [
   ],

@@ -71,6 +71,13 @@ type Config struct {
 type LatencyTarget interface {
 	fmt.Stringer
 
+	// Name returns the human readable name that describes this target.
+	// Eg: "gateway", "isp", "router", "desktop", "wifi", etc.
+	//
+	// This is passed along and displayed in metrics as a more stable
+	// identifier in addition to the ip addresses.
+	MetricName() string
+
 	// TODO: move this out to web/network-monitor/resolve
 	Resolve(context.Context, *net.Resolver) ([]netip.Addr, error)
 }
@@ -83,6 +90,7 @@ type LatencyTarget interface {
 // will fail to resolve. Negative values index from the last hop _before_ the
 // Dest specified.
 type TraceHops struct {
+	Name string
 	Dest netip.Addr
 	// Hop specifies which of the trace route hops to resolve to.
 	// Zero specifies the current host, one the first hop and so on.
@@ -119,8 +127,12 @@ func (s *TraceHops) Resolve(ctx context.Context, r *net.Resolver) ([]netip.Addr,
 	}, nil
 }
 
+func (s *TraceHops) MetricName() string {
+	return s.Name
+}
+
 func (s *TraceHops) String() string {
-	return fmt.Sprintf("TraceHops{Dest:%s, Hop:%d}", s.Dest, s.Hop)
+	return fmt.Sprintf("TraceHops{Name: %s, Dest:%s, Hop:%d}", s.Name, s.Dest, s.Hop)
 }
 
 type StaticIP struct {
@@ -131,6 +143,9 @@ var _ LatencyTarget = &StaticIP{}
 
 func (s *StaticIP) Resolve(_ context.Context, _ *net.Resolver) ([]netip.Addr, error) {
 	return []netip.Addr{s.IP}, nil
+}
+func (s *StaticIP) MetricName() string {
+	return fmt.Sprintf("static-ip:%s", s.IP)
 }
 func (s *StaticIP) String() string {
 	return fmt.Sprintf("StaticIps{%+v}", s.IP)
@@ -145,7 +160,9 @@ var _ LatencyTarget = &HostnameTarget{}
 func (s *HostnameTarget) Resolve(ctx context.Context, r *net.Resolver) ([]netip.Addr, error) {
 	return r.LookupNetIP(ctx, "ip", s.Host)
 }
-
+func (s *HostnameTarget) MetricName() string {
+	return fmt.Sprintf("host:%s", s.Host)
+}
 func (s *HostnameTarget) String() string {
 	return fmt.Sprintf("Hostname{Host:%s}", s.Host)
 }
