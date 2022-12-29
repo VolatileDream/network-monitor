@@ -123,7 +123,7 @@ func (s *TraceHops) Resolve(ctx context.Context, r *net.Resolver) ([]netip.Addr,
 	}
 
 	return []netip.Addr{
-		res.Hops[index],
+		res.Hops[index].Unmap(),
 	}, nil
 }
 
@@ -158,11 +158,40 @@ type HostnameTarget struct {
 var _ LatencyTarget = &HostnameTarget{}
 
 func (s *HostnameTarget) Resolve(ctx context.Context, r *net.Resolver) ([]netip.Addr, error) {
-	return r.LookupNetIP(ctx, "ip", s.Host)
+	addrs, err := r.LookupNetIP(ctx, "ip", s.Host)
+	return noMixIp(addrs), err
 }
 func (s *HostnameTarget) MetricName() string {
 	return fmt.Sprintf("host:%s", s.Host)
 }
 func (s *HostnameTarget) String() string {
 	return fmt.Sprintf("Hostname{Host:%s}", s.Host)
+}
+
+func noMixIp(addrs []netip.Addr) []netip.Addr {
+	if len(addrs) == 0 {
+		return addrs
+	}
+
+	mixed := false
+	for _, addr := range addrs {
+		if addr.Is4In6() {
+			mixed = true
+			break
+		}
+	}
+	if !mixed {
+		return addrs
+	}
+
+	unmix := make([]netip.Addr, 0, len(addrs))
+	for _, addr := range addrs {
+		if addr.Is4In6() {
+			unmix = append(unmix, addr.Unmap())
+		} else {
+			unmix = append(unmix, addr)
+		}
+	}
+
+	return unmix
 }
