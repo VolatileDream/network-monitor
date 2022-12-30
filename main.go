@@ -85,12 +85,14 @@ func split(ctx context.Context, c <-chan config.Config) (<-chan config.Config, <
 	two := make(chan config.Config, 1)
 
 	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case cfg := <-c:
-			one <- cfg
-			two <- cfg
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case cfg := <-c:
+				one <- cfg
+				two <- cfg
+			}
 		}
 	}()
 
