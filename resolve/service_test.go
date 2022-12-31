@@ -2,7 +2,9 @@ package resolve
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
+	"reflect"
 	"testing"
 	"time"
 
@@ -12,6 +14,26 @@ import (
 type testResolver struct {
 	t      *testing.T
 	result map[config.LatencyTarget]resolverResult
+}
+
+func NewTestResolver(t *testing.T) *testResolver {
+	return &testResolver{
+		t:      t,
+		result: make(map[config.LatencyTarget]resolverResult),
+	}
+}
+
+func (tr *testResolver) SetAddr(target config.LatencyTarget, a netip.Addr) {
+	tr.result[target] = resolverResult{
+		addrs: []netip.Addr{a},
+		err:   nil,
+	}
+}
+func (tr *testResolver) SetErr(target config.LatencyTarget, e error) {
+	tr.result[target] = resolverResult{
+		addrs: nil,
+		err:   e,
+	}
 }
 
 var _ Resolver = &testResolver{}
@@ -32,15 +54,16 @@ func (tr *testResolver) Resolve(ctx context.Context, target config.LatencyTarget
 		return result.addrs, result.err
 	}
 	tr.t.Fatalf("no resolver result for %v", target)
-	panic("did no find resolver result")
+	return nil, nil
 }
 
 func Test_ResolverService_ExitsBeforeGivenConfig(t *testing.T) {
 	tCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	tr := NewTestResolver(t)
 	c := make(chan config.Config, 1)
-	s, _ := NewService(c, &testResolver{})
+	s, _ := NewService(c, tr)
 
 	startCh := make(chan struct{})
 	doneCh := make(chan struct{})
@@ -63,6 +86,52 @@ func Test_ResolverService_ExitsBeforeGivenConfig(t *testing.T) {
 	select {
 	case <-doneCh:
 		// go routine is dead.
+	}
+}
+
+func Test_ResolverService_ErrorAfterFirstResolveThenReturnsCachedResult(t *testing.T) {
+	tCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := make(chan config.Config, 1)
+	tr := NewTestResolver(t)
+	s, results := NewService(c, tr)
+
+	go s.Run(tCtx)
+
+	var target config.LatencyTarget = &config.HostnameTarget{
+		Name: "test",
+		Host: "test",
+	}
+	addr := netip.MustParseAddr("8.8.8.8")
+	tr.SetAddr(target, addr)
+
+	cfg := config.Config{
+		Targets:         []config.LatencyTarget{target},
+		ResolveInterval: time.Hour,
+	}
+	// First config, will cause a resolve.
+	c <- cfg
+
+	expect := Result{
+		Resolved: []Resolution{
+			Resolution{
+				Target: target,
+				Addrs:  []netip.Addr{addr},
+			},
+		},
+	}
+	R := <-results
+	if !reflect.DeepEqual(R, expect) {
+		t.Fatalf("unexpected resolution: %v", R)
+	}
+
+	tr.SetErr(target, fmt.Errorf("error this time"))
+
+	c <- cfg
+	R = <-results
+	if !reflect.DeepEqual(R, expect) {
+		t.Fatalf("unexpected resolution: %v", R)
 	}
 }
 

@@ -69,13 +69,9 @@ func (m *Manager) updateTargets(r resolve.Result) {
 	newAddrs := make(map[netip.Addr]struct{})
 	targets := make([]resolve.Resolution, 0, len(r.Resolved))
 	for _, resolution := range r.Resolved {
-		if resolution.Error != nil {
-			log.Printf("failed to resolve '%s': %v", resolution.Target, resolution.Error)
-		} else {
-			targets = append(targets, resolution)
-			for _, ip := range resolution.Addrs {
-				newAddrs[ip] = struct{}{}
-			}
+		targets = append(targets, resolution)
+		for _, ip := range resolution.Addrs {
+			newAddrs[ip] = struct{}{}
 		}
 	}
 

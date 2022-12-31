@@ -34,7 +34,12 @@ type Result struct {
 type Resolution struct {
 	Target config.LatencyTarget
 	Addrs  []netip.Addr
-	Error  error
+}
+
+type resolution struct {
+	target config.LatencyTarget
+	addrs  []netip.Addr
+	err    error
 }
 
 func NewServiceWithStaticConfig(resolver Resolver, conf config.Config) (*ResolverService, <-chan Result) {
@@ -61,14 +66,14 @@ func NewService(loader ConfigLoader, resolver Resolver) (*ResolverService, <-cha
 }
 
 func (r *ResolverService) Run(ctx context.Context) {
-	var config config.Config
+	var cfg config.Config
 	select {
 	case <-ctx.Done():
 		// If the ctx is canceled, exit.
 		// It's possible, but unlikely that this happens while
 		// we wait for the config.
 		return
-	case config = <-r.loader:
+	case cfg = <-r.loader:
 		// yay.
 	}
 
@@ -76,22 +81,45 @@ func (r *ResolverService) Run(ctx context.Context) {
 	timer := time.NewTimer(time.Millisecond)
 	defer timer.Stop()
 
+	cache := make(map[config.LatencyTarget][]netip.Addr)
+
 resolve_loop:
 	for {
 		select {
 		case <-ctx.Done():
 			break resolve_loop
-		case config = <-r.loader:
-			timer.Reset(config.ResolveInterval)
+		case cfg = <-r.loader:
+			timer.Reset(cfg.ResolveInterval)
 		case <-timer.C:
-			timer.Reset(config.ResolveInterval)
+			timer.Reset(cfg.ResolveInterval)
 		}
 
 		// If we can't resolve everything quickly relative to the interval,
 		// then what was the point in trying to resolve them all?
-		rCtx, cancel := context.WithTimeout(ctx, config.ResolveInterval/2)
-		result := r.resolve(rCtx, config.Targets)
+		rCtx, cancel := context.WithTimeout(ctx, cfg.ResolveInterval/2)
+		result := r.resolve(rCtx, cfg.Targets)
 		cancel()
+
+		R := Result{
+			Resolved: make([]Resolution, 0, len(result)),
+		}
+		newCache := make(map[config.LatencyTarget][]netip.Addr)
+		for _, res := range result {
+			if res.err == nil {
+				newCache[res.target] = res.addrs
+			} else {
+				newCache[res.target] = cache[res.target]
+				log.Printf("failed to resolve '%s': %v", res.target, res.err)
+			}
+
+			if addrs := newCache[res.target]; addrs != nil {
+				R.Resolved = append(R.Resolved, Resolution{
+					Target: res.target,
+					Addrs:  addrs,
+				})
+			}
+		}
+		cache = newCache
 
 		// A caller could forever avoid reading the result, so we have to
 		// double up on exiting if the context gets cancelled. But also we
@@ -100,13 +128,13 @@ resolve_loop:
 		// not okay.
 		//
 		// Note: rCtx time + this time must be < ResolveInterval.
-		expiry := time.NewTimer(config.ResolveInterval / 4)
+		expiry := time.NewTimer(cfg.ResolveInterval / 4)
 		select {
 		case <-expiry.C:
 			log.Printf("timed out (%s) writing resolve result. reader hung?\n",
-				config.ResolveInterval/4)
+				cfg.ResolveInterval/4)
 
-		case r.results <- result:
+		case r.results <- R:
 		case <-ctx.Done():
 			// Do not return. Handled by the top of the loop.
 		}
@@ -116,14 +144,12 @@ resolve_loop:
 	close(r.results)
 }
 
-func (r *ResolverService) resolve(ctx context.Context, targets []config.LatencyTarget) Result {
+func (r *ResolverService) resolve(ctx context.Context, targets []config.LatencyTarget) []resolution {
 	// Resolve them all concurrently
 	var wg sync.WaitGroup
 
 	var rlock sync.Mutex
-	results := Result{
-		Resolved: make([]Resolution, 0, len(targets)),
-	}
+	results := make([]resolution, 0, len(targets))
 
 	for _, target := range targets {
 		wg.Add(1)
@@ -134,10 +160,10 @@ func (r *ResolverService) resolve(ctx context.Context, targets []config.LatencyT
 
 			rlock.Lock()
 			defer rlock.Unlock()
-			results.Resolved = append(results.Resolved, Resolution{
-				Target: t,
-				Addrs:  addrs,
-				Error:  err,
+			results = append(results, resolution{
+				target: t,
+				addrs:  addrs,
+				err:    err,
 			})
 		}(target)
 	}
