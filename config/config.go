@@ -9,8 +9,6 @@ import (
 	"net/netip"
 	"os"
 	"time"
-
-	"web/network-monitor/trace"
 )
 
 const (
@@ -77,9 +75,6 @@ type LatencyTarget interface {
 	// This is passed along and displayed in metrics as a more stable
 	// identifier in addition to the ip addresses.
 	MetricName() string
-
-	// TODO: move this out to web/network-monitor/resolve
-	Resolve(context.Context, *net.Resolver) ([]netip.Addr, error)
 }
 
 // TraceHops attempts to run a traceroute to Dest, and uses the IP address
@@ -99,33 +94,6 @@ type TraceHops struct {
 }
 
 var _ LatencyTarget = &TraceHops{}
-
-func (s *TraceHops) Resolve(ctx context.Context, r *net.Resolver) ([]netip.Addr, error) {
-	res, err := trace.TraceRoute(ctx, s.Dest, trace.TraceRouteOptions{
-		MaxHops:    s.Hop + 1,
-		Retries:    5,
-		HopTimeout: 2 * time.Second,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	index := s.Hop
-	if index < 0 {
-		index += len(res.Hops)
-	}
-	// If the index is outside the range of reasonable, then it's an exception.
-	// Since it's not possible to know the number of hops without having run a
-	// trace route out of band, this likely constrains passed indexes to the
-	// range between -2 and 2.
-	if index < 0 || len(res.Hops) <= index {
-		return nil, fmt.Errorf("traceroute has less than %d hops", s.Hop)
-	}
-
-	return []netip.Addr{
-		res.Hops[index].Unmap(),
-	}, nil
-}
 
 func (s *TraceHops) MetricName() string {
 	return s.Name
@@ -159,41 +127,9 @@ type HostnameTarget struct {
 
 var _ LatencyTarget = &HostnameTarget{}
 
-func (s *HostnameTarget) Resolve(ctx context.Context, r *net.Resolver) ([]netip.Addr, error) {
-	addrs, err := r.LookupNetIP(ctx, "ip", s.Host)
-	return noMixIp(addrs), err
-}
 func (s *HostnameTarget) MetricName() string {
 	return s.Name
 }
 func (s *HostnameTarget) String() string {
 	return fmt.Sprintf("Hostname{Name:%s, Host:%s}", s.Name, s.Host)
-}
-
-func noMixIp(addrs []netip.Addr) []netip.Addr {
-	if len(addrs) == 0 {
-		return addrs
-	}
-
-	mixed := false
-	for _, addr := range addrs {
-		if addr.Is4In6() {
-			mixed = true
-			break
-		}
-	}
-	if !mixed {
-		return addrs
-	}
-
-	unmix := make([]netip.Addr, 0, len(addrs))
-	for _, addr := range addrs {
-		if addr.Is4In6() {
-			unmix = append(unmix, addr.Unmap())
-		} else {
-			unmix = append(unmix, addr)
-		}
-	}
-
-	return unmix
 }
