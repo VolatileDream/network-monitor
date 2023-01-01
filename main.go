@@ -165,7 +165,7 @@ func printResults(ctx context.Context, r <-chan *ping.PingResult) {
 		instrument.WithDescription("Latency from this host to the specified target."))
 
 	if err != nil {
-		log.Printf("Failed to create metric: %v\n", err)
+		log.Fatalf("Failed to create metric: %v\n", err)
 	}
 
 	for {
@@ -175,12 +175,10 @@ func printResults(ctx context.Context, r <-chan *ping.PingResult) {
 		case result := <-r:
 			millis := float64(result.Elapsed().Microseconds()) / 1000.0
 			//log.Printf("ping result %s: %f\n", result.Dest, millis)
-			if latency != nil {
-				latency.Record(ctx,
-					millis,
-					addrKey.String(result.Dest.String()),
-					nameKey.String(result.Target.MetricName()))
-			}
+			latency.Record(ctx,
+				millis,
+				addrKey.String(result.Dest.String()),
+				nameKey.String(result.Target.MetricName()))
 		}
 	}
 }
