@@ -148,7 +148,6 @@ trace_hops:
 		found := false
 		attemptDeadline := time.Now().Add(time.Duration(tries) * hopTimeout)
 
-	attempt_hop:
 		for attempt := 0; attempt < tries && !found && time.Now().Before(attemptDeadline); attempt++ {
 			select {
 			case <-ctx.Done():
@@ -157,21 +156,21 @@ trace_hops:
 			}
 
 			echo.Seq += 1
-			//log.Printf("sending ID: %d, Seq: %d\n", echo.ID, echo.Seq)
+			//log.Printf("sending ID: %d, Seq: %d, ttl:%d\n", echo.ID, echo.Seq, ttl)
 			err := icmp.SendIcmpEcho(udpConn, &echo, result.Dest)
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) {
 					return nil, fmt.Errorf("traceroute failed: %w", err)
 				}
 				// do something reasonable.
-				log.Printf("icmp send err: %+v\n", err)
+				//log.Printf("icmp send err: %+v\n", err)
 				continue
 			}
 
 			hopDeadline := time.Now().Add(hopTimeout)
 			icmpConn.SetReadDeadline(hopDeadline)
 
-			for {
+			for !found {
 				// Continue to read packets until we hit the deadline.
 				select {
 				case <-ctx.Done():
@@ -185,39 +184,53 @@ trace_hops:
 					if !errors.Is(err, os.ErrDeadlineExceeded) {
 						// do something reasonable...
 						log.Printf("icmp read err: %+v\n", err)
+					} else {
+						//log.Printf("icmp read timeout: %+v\n", err)
 					}
 					break
 				}
 
+				// TODO: This packets we don't want. Filter other message types better.
+
+				var parseFn func(*xicmp.Message) (*xicmp.Echo, error)
+
 				if msg.Type == ipv4.ICMPTypeTimeExceeded || msg.Type == ipv6.ICMPTypeTimeExceeded {
-					prevMsg, err := parseTimeExceeded(msg)
-					if err != nil {
-						// failed to parse ignore it.
-						continue
-					}
-					if echo.ID != prevMsg.ID || echo.Seq != prevMsg.Seq {
-						// Packet not for us.
-						//log.Printf("ignoring recv ID: %d, Seq: %d\n", prevMsg.ID, prevMsg.Seq)
-						continue
-					}
-					//log.Printf("recv with match ID: %d, Seq: %d\n", prevMsg.ID, prevMsg.Seq)
+					parseFn = parseTimeExceeded
+				} else if msg.Type == ipv4.ICMPTypeEchoReply || msg.Type == ipv6.ICMPTypeEchoReply {
+					parseFn = parseEchoReply
+				} else {
+					log.Printf("unexpected icmp type %v: %#v\n", msg.Type, msg.Body)
+					continue
 				}
 
+				recvMsg, err := parseFn(msg)
+				if err != nil {
+					// failed to parse ignore it.
+					log.Printf("could not extract icmp echo from received packet: %w", err)
+					continue
+				}
+
+				if echo.ID != recvMsg.ID || echo.Seq != recvMsg.Seq {
+					// Packet not for us.
+					//log.Printf("ignoring recv ID: %d, Seq: %d\n", recvMsg.ID, recvMsg.Seq)
+					continue
+				}
+
+				//log.Printf("recv with match ID: %d, Seq: %d, from: %v\n", recvMsg.ID, recvMsg.Seq, addr)
 				found = true
 				result.Hops = append(result.Hops, addr)
 
 				if msg.Type == ipv4.ICMPTypeEchoReply || msg.Type == ipv6.ICMPTypeEchoReply {
 					break trace_hops
-				} else {
-					break attempt_hop
 				}
 			} // read loop
-		} // attempt_hop
+		} // write loop
 
 		if !found {
+			log.Printf("Hop %d not found...\n", ttl)
 			result.Hops = append(result.Hops, netip.Addr{})
 		}
-	}
+	} // hop loop
 
 	return result, nil
 }
@@ -279,7 +292,7 @@ func parseTimeExceeded(m *xicmp.Message) (*xicmp.Echo, error) {
 	if m.Type == ipv4.ICMPTypeTimeExceeded {
 		h, err := ipv4.ParseHeader(te.Data)
 		if err != nil {
-			return nil, fmt.Errorf("no ip header: %w", err)
+			return nil, fmt.Errorf("parse ttl packet: no ip header: %w", err)
 		}
 
 		protocol = 1
@@ -294,12 +307,16 @@ func parseTimeExceeded(m *xicmp.Message) (*xicmp.Echo, error) {
 	// This message is TRUNCATED.
 	prevMsg, err := xicmp.ParseMessage(protocol, te.Data[offset:])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse icmp packet")
+		return nil, fmt.Errorf("parse ttl packet: failed to parse contents: %w", err)
 	}
 
 	if prevMsg.Type != ipv4.ICMPTypeEcho && prevMsg.Type != ipv6.ICMPTypeEchoRequest {
-		return nil, fmt.Errorf("not an icmp echo packet")
+		return nil, fmt.Errorf("parse ttl packet: did not contain icmp echo")
 	}
 
 	return prevMsg.Body.(*xicmp.Echo), nil
+}
+
+func parseEchoReply(m *xicmp.Message) (*xicmp.Echo, error) {
+	return m.Body.(*xicmp.Echo), nil
 }
