@@ -40,7 +40,7 @@ func (r *netresolver) Resolve(ctx context.Context, t config.LatencyTarget) ([]ne
 		return r.resolveHost(ctx, t.(*config.HostnameTarget))
 	case *config.StaticIP:
 		s := t.(*config.StaticIP)
-		return []netip.Addr{s.IP}, nil
+		return filter([]netip.Addr{s.IP}), nil
 	}
 	return nil, fmt.Errorf("could not resolve target of type %v\n", t)
 }
@@ -67,40 +67,27 @@ func (r *netresolver) resolveHops(ctx context.Context, th *config.TraceHops) ([]
 		return nil, fmt.Errorf("traceroute has less than %d hops", th.Hop)
 	}
 
-	return []netip.Addr{
+	return filter([]netip.Addr{
 		res.Hops[index].Unmap(),
-	}, nil
+	}), nil
 }
 
 func (r *netresolver) resolveHost(ctx context.Context, s *config.HostnameTarget) ([]netip.Addr, error) {
 	addrs, err := r.resolver.LookupNetIP(ctx, "ip", s.Host)
-	return addrs, err
+	return filter(addrs), err
 }
 
-func noMixIp(addrs []netip.Addr) []netip.Addr {
+func filter(addrs []netip.Addr) []netip.Addr {
 	if len(addrs) == 0 {
 		return addrs
 	}
 
-	mixed := false
+	result := make([]netip.Addr, 0, len(addrs))
 	for _, addr := range addrs {
-		if addr.Is4In6() {
-			mixed = true
-			break
+		addr = addr.Unmap()
+		if AllowedAddr(addr) {
+			result = append(result, addr)
 		}
 	}
-	if !mixed {
-		return addrs
-	}
-
-	unmix := make([]netip.Addr, 0, len(addrs))
-	for _, addr := range addrs {
-		if addr.Is4In6() {
-			unmix = append(unmix, addr.Unmap())
-		} else {
-			unmix = append(unmix, addr)
-		}
-	}
-
-	return unmix
+	return result
 }
