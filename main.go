@@ -163,9 +163,18 @@ func printResults(ctx context.Context, r <-chan *ping.PingResult) {
 		"network/latency",
 		instrument.WithUnit(unit.Milliseconds),
 		instrument.WithDescription("Latency from this host to the specified target."))
-
 	if err != nil {
-		log.Fatalf("Failed to create metric: %v\n", err)
+		log.Fatalf("failed to create metric: %v\n", err)
+	}
+	// Without a lost packet counter, the histogram gets polluted with +Inf values.
+	// This is possibly because of the poor support for out-of-order packets, but
+	// given the orders of magnitude between network latency & packet frequency,
+	// it's more likely just disappearing packets.
+	lost, err := meter.SyncInt64().Counter(
+		"network/latency/lost-packets",
+		instrument.WithDescription("Count of packets that failed to deliver."))
+	if err != nil {
+		log.Fatalf("failed to create metric: %v\n", err)
 	}
 
 	for {
@@ -173,12 +182,18 @@ func printResults(ctx context.Context, r <-chan *ping.PingResult) {
 		case <-ctx.Done():
 			return
 		case result := <-r:
-			millis := float64(result.Elapsed().Microseconds()) / 1000.0
-			//log.Printf("ping result %s: %f\n", result.Dest, millis)
-			latency.Record(ctx,
-				millis,
-				addrKey.String(result.Dest.String()),
-				nameKey.String(result.Target.MetricName()))
+			if !result.Recv.IsZero() {
+				millis := float64(result.Elapsed().Microseconds()) / 1000.0
+				//log.Printf("ping result %s: %f\n", result.Dest, millis)
+				latency.Record(ctx,
+					millis,
+					addrKey.String(result.Dest.String()),
+					nameKey.String(result.Target.MetricName()))
+			} else {
+				lost.Add(ctx, 1,
+					addrKey.String(result.Dest.String()),
+					nameKey.String(result.Target.MetricName()))
+			}
 		}
 	}
 }
