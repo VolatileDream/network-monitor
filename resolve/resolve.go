@@ -84,7 +84,9 @@ func filter(addrs []netip.Addr) []netip.Addr {
 
 	result := make([]netip.Addr, 0, len(addrs))
 	for _, addr := range addrs {
-		addr = addr.Unmap()
+		if !*mixed4In6Flag {
+			addr = addr.Unmap()
+		}
 		if AllowedAddr(addr) {
 			result = append(result, addr)
 		}

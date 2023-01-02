@@ -74,13 +74,12 @@ type TraceResult struct {
 func TraceRoute(ctx context.Context, dest netip.Addr, opts TraceRouteOptions) (*TraceResult, error) {
 	r := rand.New(rand.NewSource(time.Now().UnixMicro()))
 
-	dest = dest.Unmap() // remove 4in6 weirdness
 	result := &TraceResult{
 		Dest: dest,
 		Hops: make([]netip.Addr, 0, DefaultTTL),
 	}
 	if opts.Interface.IsValid() {
-		result.Source = opts.Interface.Unmap()
+		result.Source = opts.Interface
 	} else if dest.Is4() {
 		result.Source = netip.IPv4Unspecified()
 	} else {

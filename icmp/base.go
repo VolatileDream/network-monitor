@@ -51,10 +51,6 @@ var (
 )
 
 func listen(ip netip.Addr, cfg bindCfg) (*xicmp.PacketConn, error) {
-	if ip.Is4In6() {
-		ip = ip.Unmap()
-	}
-
 	addr := ip.String()
 	proto := cfg.ip6
 	if ip.Is4() {
