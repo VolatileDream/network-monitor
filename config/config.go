@@ -110,9 +110,6 @@ type StaticIP struct {
 
 var _ LatencyTarget = &StaticIP{}
 
-func (s *StaticIP) Resolve(_ context.Context, _ *net.Resolver) ([]netip.Addr, error) {
-	return []netip.Addr{s.IP}, nil
-}
 func (s *StaticIP) MetricName() string {
 	return s.Name
 }
