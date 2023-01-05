@@ -46,7 +46,8 @@ const (
 )
 
 var (
-	errNotTtlPacket = fmt.Errorf("not a ttl exceeded packet")
+	errNotTtlPacket     = fmt.Errorf("not a ttl exceeded packet")
+	errNotDstUnreachPkt = fmt.Errorf("not a destination unreachable packet")
 )
 
 type TraceRouteOptions struct {
@@ -194,7 +195,10 @@ trace_hops:
 				var parseFn func(*xicmp.Message) (*xicmp.Echo, error)
 
 				if msg.Type == ipv4.ICMPTypeTimeExceeded || msg.Type == ipv6.ICMPTypeTimeExceeded {
-					parseFn = parseTimeExceeded
+					parseFn = parseInnerMsg
+				} else if msg.Type == ipv4.ICMPTypeDestinationUnreachable || msg.Type == ipv6.ICMPTypeDestinationUnreachable {
+					parseFn = parseInnerMsg
+
 				} else if msg.Type == ipv4.ICMPTypeEchoReply || msg.Type == ipv6.ICMPTypeEchoReply {
 					parseFn = parseEchoReply
 				} else {
@@ -275,42 +279,50 @@ func setTTL(conn *xicmp.PacketConn, ttl int) error {
 	return fmt.Errorf("unknown connection type: %+v", conn)
 }
 
-func parseTimeExceeded(m *xicmp.Message) (*xicmp.Echo, error) {
-	if m.Type != ipv4.ICMPTypeTimeExceeded && m.Type != ipv6.ICMPTypeTimeExceeded {
-		return nil, errNotTtlPacket
-	}
-	te, ok := m.Body.(*xicmp.TimeExceeded)
-	if !ok {
-		return nil, errNotTtlPacket
+func parseInnerMsg(m *xicmp.Message) (*xicmp.Echo, error) {
+	var data []byte
+	if m.Type == ipv4.ICMPTypeTimeExceeded || m.Type == ipv6.ICMPTypeTimeExceeded {
+		te, ok := m.Body.(*xicmp.TimeExceeded)
+		if !ok {
+			return nil, errNotTtlPacket
+		}
+		data = te.Data
+	} else if m.Type == ipv4.ICMPTypeDestinationUnreachable || m.Type == ipv6.ICMPTypeDestinationUnreachable {
+		du, ok := m.Body.(*xicmp.DstUnreach)
+		if !ok {
+			return nil, errNotDstUnreachPkt
+		}
+		data = du.Data
 	}
 
 	var protocol int
 	var offset int
 
 	// Handle ipv4
-	if m.Type == ipv4.ICMPTypeTimeExceeded {
-		h, err := ipv4.ParseHeader(te.Data)
+	switch m.Type.(type) {
+	case ipv4.ICMPType:
+		h, err := ipv4.ParseHeader(data)
 		if err != nil {
-			return nil, fmt.Errorf("parse ttl packet: no ip header: %w", err)
+			return nil, fmt.Errorf("no ip4 header: %w", err)
 		}
 
 		protocol = 1
 		offset = h.Len + len(h.Options)
 
-	} else {
+	case ipv6.ICMPType:
 		// Handle ipv6
 		protocol = 58
 		offset = ipv6.HeaderLen
 	}
 
 	// This message is TRUNCATED.
-	prevMsg, err := xicmp.ParseMessage(protocol, te.Data[offset:])
+	prevMsg, err := xicmp.ParseMessage(protocol, data[offset:])
 	if err != nil {
-		return nil, fmt.Errorf("parse ttl packet: failed to parse contents: %w", err)
+		return nil, fmt.Errorf("failed to parse contents: %w", err)
 	}
 
 	if prevMsg.Type != ipv4.ICMPTypeEcho && prevMsg.Type != ipv6.ICMPTypeEchoRequest {
-		return nil, fmt.Errorf("parse ttl packet: did not contain icmp echo")
+		return nil, fmt.Errorf("contents not icmp echo")
 	}
 
 	return prevMsg.Body.(*xicmp.Echo), nil
