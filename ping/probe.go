@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"web/network-monitor/config"
-	"web/network-monitor/icmp"
-	"web/network-monitor/resolve"
+	"github.com/VolatileDream/workbench/web/network-monitor/config"
+	"github.com/VolatileDream/workbench/web/network-monitor/icmp"
+	"github.com/VolatileDream/workbench/web/network-monitor/resolve"
 
 	xicmp "golang.org/x/net/icmp"
 )
@@ -129,7 +129,7 @@ func (p *pinger) send(ctx context.Context, dest netip.Addr, t config.LatencyTarg
 	echo := xicmp.Echo{
 		ID:   0, // can't be set by us.
 		Seq:  int(p.sequence),
-		Data: []byte("VolatileDream//web/network-monitor"),
+		Data: []byte("github.com/VolatileDream"),
 	}
 
 	now := time.Now()

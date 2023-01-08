@@ -1,0 +1,23 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "resolve",
+    srcs = [
+        "ips.go",
+        "resolve.go",
+        "service.go",
+    ],
+    importpath = "github.com/VolatileDream/workbench/web/network-monitor/resolve",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//web/network-monitor/config",
+        "//web/network-monitor/trace",
+    ],
+)
+
+go_test(
+    name = "resolve_test",
+    srcs = ["service_test.go"],
+    embed = [":resolve"],
+    deps = ["//web/network-monitor/config"],
+)

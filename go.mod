@@ -1,4 +1,4 @@
-module web/network-monitor
+module github.com/VolatileDream/workbench/web/network-monitor
 
 go 1.18
 

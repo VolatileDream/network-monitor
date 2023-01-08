@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "ping",
+    srcs = [
+        "manager.go",
+        "probe.go",
+        "result.go",
+    ],
+    importpath = "github.com/VolatileDream/workbench/web/network-monitor/ping",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//web/network-monitor/config",
+        "//web/network-monitor/icmp",
+        "//web/network-monitor/resolve",
+        "@org_golang_x_net//icmp",
+    ],
+)

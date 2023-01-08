@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "icmp",
+    srcs = ["base.go"],
+    importpath = "github.com/VolatileDream/workbench/web/network-monitor/icmp",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//web/network-monitor/ip",
+        "@org_golang_x_net//icmp",
+        "@org_golang_x_net//ipv4",
+        "@org_golang_x_net//ipv6",
+    ],
+)

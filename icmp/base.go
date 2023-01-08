@@ -7,7 +7,7 @@ import (
 	"net/netip"
 	"time"
 
-	"web/network-monitor/ip"
+	"github.com/VolatileDream/workbench/web/network-monitor/ip"
 
 	xicmp "golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"

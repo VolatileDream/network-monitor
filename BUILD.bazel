@@ -1,0 +1,25 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "network-monitor_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/VolatileDream/workbench/web/network-monitor",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//web/network-monitor/config",
+        "//web/network-monitor/ping",
+        "//web/network-monitor/resolve",
+        "//web/network-monitor/telemetry",
+        "@io_opentelemetry_go_otel//attribute",
+        "@io_opentelemetry_go_otel_metric//:metric",
+        "@io_opentelemetry_go_otel_metric//global",
+        "@io_opentelemetry_go_otel_metric//instrument",
+        "@io_opentelemetry_go_otel_metric//unit",
+    ],
+)
+
+go_binary(
+    name = "network-monitor",
+    embed = [":network-monitor_lib"],
+    visibility = ["//visibility:public"],
+)

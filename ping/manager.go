@@ -5,8 +5,8 @@ import (
 	"log"
 	"net/netip"
 
-	"web/network-monitor/config"
-	"web/network-monitor/resolve"
+	"github.com/VolatileDream/workbench/web/network-monitor/config"
+	"github.com/VolatileDream/workbench/web/network-monitor/resolve"
 )
 
 type ProbeRequest struct {

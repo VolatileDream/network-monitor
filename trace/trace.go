@@ -27,7 +27,7 @@ import (
 	"os"
 	"time"
 
-	"web/network-monitor/icmp"
+	"github.com/VolatileDream/workbench/web/network-monitor/icmp"
 
 	xicmp "golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
@@ -121,7 +121,7 @@ func TraceRoute(ctx context.Context, dest netip.Addr, opts TraceRouteOptions) (*
 		// Setting it to that port ourselves makes it easier to reason about.
 		ID:   portId,
 		Seq:  r.Int() & 0xFFFF, // incremented later.
-		Data: []byte("VolatileDream//web/network-monitor"),
+		Data: []byte("github.com/VolatileDream"),
 		//Data: []byte("@@@@@@"),
 	}
 

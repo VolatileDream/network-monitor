@@ -7,8 +7,8 @@ import (
 	"net/netip"
 	"time"
 
-	"web/network-monitor/config"
-	"web/network-monitor/trace"
+	"github.com/VolatileDream/workbench/web/network-monitor/config"
+	"github.com/VolatileDream/workbench/web/network-monitor/trace"
 )
 
 type Resolver interface {

@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"web/network-monitor/config"
-	"web/network-monitor/ping"
-	"web/network-monitor/resolve"
-	"web/network-monitor/telemetry"
+	"github.com/VolatileDream/workbench/web/network-monitor/config"
+	"github.com/VolatileDream/workbench/web/network-monitor/ping"
+	"github.com/VolatileDream/workbench/web/network-monitor/resolve"
+	"github.com/VolatileDream/workbench/web/network-monitor/telemetry"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"

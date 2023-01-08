@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"web/network-monitor/config"
+	"github.com/VolatileDream/workbench/web/network-monitor/config"
 )
 
 type testResolver struct {

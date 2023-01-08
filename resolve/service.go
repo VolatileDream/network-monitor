@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"web/network-monitor/config"
+	"github.com/VolatileDream/workbench/web/network-monitor/config"
 )
 
 type ConfigLoader <-chan config.Config

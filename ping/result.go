@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"time"
 
-	"web/network-monitor/config"
+	"github.com/VolatileDream/workbench/web/network-monitor/config"
 )
 
 type PingResult struct {
