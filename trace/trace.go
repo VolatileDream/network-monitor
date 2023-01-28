@@ -15,6 +15,8 @@ package trace
 // net/ package to maybe provide cross platform support, to avoid raw
 // socket manipulation ourselves. Additionally, we use net/netip.Addr
 // because it is a better type than net.Addr.
+//
+// [0]: github.com/aeden/traceroute
 
 import (
 	"context"
