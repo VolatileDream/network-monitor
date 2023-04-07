@@ -22,4 +22,6 @@ go_binary(
     name = "network-monitor",
     embed = [":network-monitor_lib"],
     visibility = ["//visibility:public"],
+    static = "on",
+    pure = "on",
 )
